@@ -7,8 +7,6 @@ import multiprocessing
 from datetime import datetime, timedelta
 
 
-
-# Connessione a MetaTrader 5
 def initialize_mt5():
     if not mt5.initialize():
         logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
@@ -22,6 +20,34 @@ def close_order(order_ticket):
         
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minutes):
+    """Sends a trade order to the MetaTrader5 platform.
+
+    The function determines the appropriate order type (limit or stop) based on the 
+    specified `order_type` and the current market price. It then constructs and sends 
+    an order request using the MetaTrader5 API.
+
+    Args:
+        order_type (str): The type of order, either "BUY" or "SELL".
+        symbol (str): The trading symbol (e.g., "EURUSD").
+        volume (float): The number of lots to trade.
+        sl (float): The stop loss price.
+        tp (float): The take profit price.
+        entry_price (float): The price at which to enter the trade.
+        magic (int): A unique identifier for the trade.
+        num_minutes (int): The time duration in minutes before the order expires.
+
+    Returns:
+        dict: The result of the `mt5.order_send()` function containing information 
+        about the order execution.
+        None: If an error occurs during order preparation or submission.
+    
+    Notes:
+        - The function retrieves the current market price using `mt5.symbol_info_tick()`.
+        - It sets the appropriate order type based on the market price and the provided `entry_price`.
+        - Symbol visibility is ensured using `mt5.symbol_select()`.
+        - The order request includes parameters such as deviation, action, and expiration.
+    """
+
     #configuriamo il tipo d'ordine
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
@@ -78,12 +104,6 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minute
     return result.order
 
 
-#prende il messaggio e cerca di estrarre specifiche informazioni
-#pair: a currency pair (e.g. "EUR/USD")
-#action: either "BUY" or "SELL"
-#entry_price: the price at which to enter the trade
-#sl: the stop loss price
-#tp1, tp2, tp3: three take profit price
 def parse_command(message):
     """Parses a trading command message to extract key trading details.
 
