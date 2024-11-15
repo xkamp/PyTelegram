@@ -15,6 +15,7 @@ def initialize_mt5():
         raise SystemExit("Errore nella connessione a MetaTrader 5")
     logging.info("MetaTrader 5 inizializzato con successo.")
 
+
 def close_order(order_ticket):
     if order_ticket is not None:
         mt5.order_close(order_ticket)
@@ -77,8 +78,36 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minute
     return result.order
 
 
-
+#prende il messaggio e cerca di estrarre specifiche informazioni
+#pair: a currency pair (e.g. "EUR/USD")
+#action: either "BUY" or "SELL"
+#entry_price: the price at which to enter the trade
+#sl: the stop loss price
+#tp1, tp2, tp3: three take profit price
 def parse_command(message):
+    """Parses a trading command message to extract key trading details.
+
+    The function uses regular expressions to identify and extract:
+        - `pair`: A currency pair (e.g., "EUR/USD").
+        - `action`: The trading action, either "BUY" or "SELL".
+        - `entry_price`: The entry price for the trade.
+        - `sl`: The stop loss price.
+        - `tp1`, `tp2`, `tp3`: Three take profit prices.
+
+    Args:
+        message (str): The message containing the trading command.
+
+    Returns:
+        dict: A dictionary with the following keys and extracted values:
+            - 'pair' (str): The currency pair.
+            - 'action' (str): The trading action ("BUY" or "SELL").
+            - 'entry_price' (float): The entry price.
+            - 'sl' (float): The stop loss price.
+            - 'tp1' (float): The first take profit price.
+            - 'tp2' (float): The second take profit price.
+            - 'tp3' (float): The third take profit price.
+        None: If parsing fails or the message format is invalid.
+    """
     try:
         # Compilazione dei pattern per le espressioni regolari
         pair_pattern = re.compile(r"([A-Z]{3})/([A-Z]{3})")  # Modifica per separare le valute
