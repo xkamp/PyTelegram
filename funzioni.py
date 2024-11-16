@@ -2,7 +2,7 @@ from telethon import TelegramClient, events
 import MetaTrader5 as mt5
 import logging
 import re
-import time
+import json
 import multiprocessing
 from datetime import datetime, timedelta
 import sqlite3
@@ -390,3 +390,23 @@ def monitor_order_process(order_id, tp, sl, symbol, order_type, message_id, conn
     process.start()
 
 
+def carica_dizionario_da_json(nome_file):
+    """
+    Carica un dizionario da un file JSON.
+    
+    Parametri:
+    nome_file (str): Il nome del file JSON da cui caricare il dizionario.
+    
+    Restituisce:
+    dict: Il dizionario caricato dal file JSON.
+    """
+    try:
+        with open(nome_file, 'r') as file:
+            dizionario = json.load(file)
+        return dizionario
+    except FileNotFoundError:
+        logging.error(f"Errore: il file {nome_file} non è stato trovato.")
+    except json.JSONDecodeError:
+        logging.error(f"Errore: il file {nome_file} non è un file JSON valido.")
+    except Exception as e:
+        logging.error(f"Errore inaspettato: {e}")

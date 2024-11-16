@@ -10,7 +10,7 @@ api_hash = "f339f77b7c693302c8d318a91f86c1b0"
 telegram_client_name = "my_session"
 nome_db = "database"
 dict_messageid_orderid = {}
-
+comandi = carica_dizionario_da_json("comandi.json")
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -36,6 +36,10 @@ async def handler(event):
     if event.is_reply:
         # Se il messaggio è una risposta, esegui azioni specifiche
         logging.info("Il messaggio è una risposta, ma non sono state specificate azioni.")
+
+
+
+
     else:
         # Se non è una risposta, prosegui con il processo del comando
         message = event.raw_text
@@ -74,8 +78,13 @@ async def handler(event):
         else:
             # Messaggio di segnale non valido
             logging.warning("Messaggio non valido.")
+
+
+
 # Avvia il client Telegram
 async def main():
+
+
     logging.info("Avvio del client Telegram...")
     await client.start()
     logging.info("Client Telegram avviato.")

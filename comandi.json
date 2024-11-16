@@ -1,4 +1,9 @@
 {
-    "str1": "ciao, test, cajsda",
-    "str2": "ciao, test, cajsd"
+    "change_TP1": "change tp1",
+    "change_TP2": "change tp2",
+    "change_TP3": "change tp3",
+    "change_TP4": "change tp4",
+    "change_TP5": "change tp5",
+    "change_SL" : "change sl",
+    "breakeven": "breakeven, secure"
 }
