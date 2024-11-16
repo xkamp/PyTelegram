@@ -37,7 +37,7 @@
 Avvia il programma:
 
 ```bash
-python pyTelegram.py
+pythonT main.py
 ```
 
 Il programma inizierà a ricevere i segnali dal canale Telegram **forexpert** e ad eseguire le azioni su MT5 automaticamente.
@@ -55,4 +55,3 @@ Se vuoi contribuire a pyTelegram, sentiti libero di fare un fork del repository 
 ## Licenza
 
 Distribuito sotto la licenza **MIT**. Vedi il file [LICENSE](LICENSE) per ulteriori dettagli.
-```
