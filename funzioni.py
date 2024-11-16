@@ -5,7 +5,7 @@ import re
 import time
 import multiprocessing
 from datetime import datetime, timedelta
-
+import sqlite3
 
 
 def initialize_mt5():
@@ -272,3 +272,33 @@ def monitor_order_process(order_ticket, tp, sl, symbol, order_type):
     process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
     process.start()
 
+
+def connessione_db(nome_db):
+    return sqlite3.connect(f"{nome_db}.db")
+
+
+def crea_tabelle(conn):
+    c = conn.cursor()
+    c.execute('''  
+        CREATE TABLE IF NOT EXISTS MessageIdOrderId (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            MessageId INTEGER,
+            OrderId INTEGER
+        )
+    ''')
+    conn.commit()
+
+
+def inserisci_id(conn, MessageId, OrderId):
+    c = conn.cursor()
+    c.execute("INSERT INTO MessageIdOrderId (MessageId, OrderId) VALUES (?,?)", (MessageId,OrderId))
+    conn.commit()
+
+def cerca_messageid(conn, MessageId):
+    c=conn.cursor()
+    c.execute("SELECT * FROM MessageIdOrderId WHERE MessageId=?", (MessageId,))
+    return c.fetchone()
+
+# Funzione per chiudere la connessione
+def chiudi_connessione(conn):
+    conn.close()

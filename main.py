@@ -8,6 +8,7 @@ from funzioni import *  # Assicurati che le funzioni necessarie siano nel modulo
 api_id = 21280755
 api_hash = "f339f77b7c693302c8d318a91f86c1b0"
 telegram_client_name = "my_session"
+nome_db = "database"
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -42,14 +43,13 @@ async def handler(event):
         volume = 0.01  # Ad esempio, volume fisso per ogni trade. Puoi personalizzarlo
         num_minutes = 3  # Sostituire con il numero di minuti
         magic = event.message.id #assoiccio il mio ordine al mio messaggio(NON IMPLEMENTATO)
-        #logging.info(f"Invio ordine per {symbol} con TP={take_profits} e SL={stop_loss}.")
 
 
         # Invia un ordine per ogni Take Profit
         for tp in take_profits:
             success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, magic, num_minutes)
             #dentro success c'è il numero dell'ordine che serve a modificare l'ordine
-            monitor_order_process(success, tp, stop_loss, symbol, order_type)
+            monitor_order_process(success, tp, stop_loss, symbol, order_type)  # Avvia il processo di monitoraggio
             if success:
                 logging.info(f"Trade eseguito con TP={tp}.")
             else:
