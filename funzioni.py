@@ -7,6 +7,7 @@ import multiprocessing
 from datetime import datetime, timedelta
 
 
+
 def initialize_mt5():
     if not mt5.initialize():
         logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
@@ -14,10 +15,12 @@ def initialize_mt5():
     logging.info("MetaTrader 5 inizializzato con successo.")
 
 
+
 def close_order(order_ticket):
     if order_ticket is not None:
         mt5.order_close(order_ticket)
-        
+
+
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minutes):
     """Sends a trade order to the MetaTrader5 platform.
@@ -104,6 +107,7 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minute
     return result.order
 
 
+
 def parse_command(message):
     """Parses a trading command message to extract key trading details.
 
@@ -166,10 +170,31 @@ def parse_command(message):
         return None
 
 
-# Funzione per monitorare e chiudere l'ordine su ogni tick di mercato
+
 def monitor_order(order_ticket, tp, sl, symbol, order_type):
-    #logging.info(f"Monitoraggio dell'ordine {order_ticket} in corso...")
-    #logging.info(f"TP: {tp}, SL: {sl}, Symbol: {symbol}, Order Type: {order_type}")
+    """Monitors a trade order and closes it when the Take Profit or Stop Loss is reached.
+
+    The function continuously checks the current market price for the specified symbol 
+    and compares it with the Take Profit (TP) and Stop Loss (SL) levels. If the price 
+    reaches either of these levels, the order is closed.
+
+    Args:
+        order_ticket (int): The unique ID of the order to monitor.
+        tp (float): The Take Profit price.
+        sl (float): The Stop Loss price.
+        symbol (str): The trading symbol (e.g., "EURUSD").
+        order_type (str): The type of order ("BUY" or "SELL").
+
+    Returns:
+        None: The function runs indefinitely, continuously monitoring the order.
+    
+    Notes:
+        - The function initializes the MetaTrader 5 platform and checks if the symbol is visible.
+        - If the symbol is not active, it attempts to select it using `mt5.symbol_select()`.
+        - The market price is retrieved using `mt5.symbol_info_tick()` and compared with TP/SL.
+        - If the TP or SL is reached, the order is closed using a helper function `close_order()`.
+    """
+
     last_tick = None
     if not mt5.initialize():
         # Se l'inizializzazione fallisce, logga l'errore
@@ -220,8 +245,29 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type):
                     break
 
 
-# Funzione per avviare un processo separato che monitori ogni tick di mercato
+
 def monitor_order_process(order_ticket, tp, sl, symbol, order_type):
+    """Starts a new process to monitor a trade order in the background.
+
+    This function creates and starts a new process that runs the `monitor_order` 
+    function with the provided arguments. The monitoring process will continue 
+    running independently of the main program.
+
+    Args:
+        order_ticket (int): The unique ID of the order to monitor.
+        tp (float): The Take Profit price.
+        sl (float): The Stop Loss price.
+        symbol (str): The trading symbol (e.g., "EURUSD").
+        order_type (str): The type of order ("BUY" or "SELL").
+
+    Returns:
+        None: The function starts a new process to monitor the order.
+    
+    Notes:
+        - The new process runs with `process.daemon = False`, meaning it will continue
+          running even after the main program terminates.
+        - The function invokes the `monitor_order` function with the provided arguments.
+    """
     process = multiprocessing.Process(target=monitor_order, args=(order_ticket, tp, sl, symbol, order_type))
     process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
     process.start()
