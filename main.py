@@ -58,8 +58,8 @@ async def handler(event):
             for retries in range(max_retries):
                 success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, magic, num_minutes)
                 if success is not None:
-                    manage_dict_messageid_orderid(dict_messageid_orderid, event.message.id, success, inserisci_id_database_async, conn)
-                    monitor_order_process(success, tp, stop_loss, symbol, order_type)  # Avvia il processo di monitoraggio
+                    manage_dict_messageid_orderid(dict_messageid_orderid, event.message.id, success, inserisci_id_database_async, conn) #Inserisce coppia nel dizionario e se è troppo grosso la salva nel db
+                    monitor_order_process(success, tp, stop_loss, symbol, order_type, event.message.id, conn. dict_messageid_orderid)  # Avvia il processo di monitoraggio
                     break
                 else:
                     logging.info(f"Impossibile inviare l'ordine dopo {max_retries} tentativi.")
