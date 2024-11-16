@@ -19,13 +19,39 @@ def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
 
+
 def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
-    if order_ticket is not None:
-        mt5.order_close(order_ticket)
-        order = mt5.order_get(order_ticket)
-        if  order is None:
-            # Ordine chiuso con successo quindi cancella dal dizionario
-            cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket, conn)
+    if order_ticket is None:
+        return False
+
+    # Ottieni l'ordine
+    ordine = mt5.order_get(order_ticket)
+    if ordine is None:
+        return False
+    
+        # Determina l'azione da eseguire (chiusura dell'ordine)
+    if ordine.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT, 
+                        mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP]:
+        action = mt5.TRADE_ACTION_REMOVE  # Rimuove un ordine pendente
+    else:
+        action = mt5.TRADE_ACTION_DEAL  # Chiude un ordine aperto
+
+    # Chiudi l'ordine (sia aperto che pendente)
+    result = mt5.order_send(
+        action=action,
+        symbol=ordine.symbol,
+        volume=ordine.volume,
+        type=ordine.type,
+        price=ordine.price,
+        sl=ordine.sl,
+        tp=ordine.tp,
+        magic=ordine.magic,
+        ticket=order_ticket
+    )
+    
+    # Restituisce True se l'ordine è stato chiuso con successo
+    if result > 0:
+        cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket, conn)
 
 
 

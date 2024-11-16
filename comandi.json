@@ -1,9 +1,16 @@
 {
-    "change_TP1": "change tp1",
-    "change_TP2": "change tp2",
-    "change_TP3": "change tp3",
-    "change_TP4": "change tp4",
-    "change_TP5": "change tp5",
-    "change_SL" : "change sl",
-    "breakeven": "breakeven, secure"
+    "change_TP1": "CHANGE TP1 TO",
+    "change_TP2": "CHANGE TP2 TO",
+    "change_TP3": "CHANGE TP3 TO",
+    "change_TP4": "CHANGE TP4 TO",
+    "change_TP5": "CHANGE TP5 TO",
+    "change_SL" : "CHANGE SL TO",
+    "breakeven": "SECURE THIS TRADE",
+    "close full" : "MANUALLY CLOSE, CANCEL THIS TRADE, REMOVE IT",
+    "close_TP1" : "MANUALLY CLOSE TP1",
+    "close_TP2" : "MANUALLY CLOSE TP2",
+    "close_TP3" : "MANUALLY CLOSE TP3",
+    "close_TP4" : "MANUALLY CLOSE TP4",
+    "close_TP5" : "MANUALLY CLOSE TP5",
+    "delete" : ""
 }
