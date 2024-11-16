@@ -9,9 +9,16 @@ api_id = 21280755
 api_hash = "f339f77b7c693302c8d318a91f86c1b0"
 telegram_client_name = "my_session"
 nome_db = "database"
+dict_messageid_orderid = {}
+
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+#configurazione database
+conn = connessione_db(nome_db)
+#creazione delle tabele se non esistono
+crea_tabelle_database(conn)
 
 # Configura il client Telegram
 client = TelegramClient(telegram_client_name, api_id, api_hash)
@@ -43,17 +50,20 @@ async def handler(event):
         volume = 0.01  # Ad esempio, volume fisso per ogni trade. Puoi personalizzarlo
         num_minutes = 3  # Sostituire con il numero di minuti
         magic = event.message.id #assoiccio il mio ordine al mio messaggio(NON IMPLEMENTATO)
+        max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
 
 
         # Invia un ordine per ogni Take Profit
         for tp in take_profits:
-            success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, magic, num_minutes)
-            #dentro success c'è il numero dell'ordine che serve a modificare l'ordine
-            monitor_order_process(success, tp, stop_loss, symbol, order_type)  # Avvia il processo di monitoraggio
-            if success:
-                logging.info(f"Trade eseguito con TP={tp}.")
-            else:
-                logging.error(f"Errore nell'esecuzione del trade con TP={tp}.")
+            for retries in range(max_retries):
+                success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, magic, num_minutes)
+                if success is not None:
+                    manage_dict_messageid_orderid(dict_messageid_orderid, event.message.id, success, inserisci_id_database_async, conn)
+                    monitor_order_process(success, tp, stop_loss, symbol, order_type)  # Avvia il processo di monitoraggio
+                    break
+                else:
+                    logging.info(f"Impossibile inviare l'ordine dopo {max_retries} tentativi.")
+
     else:
         #segnale non valido
         logging.warning("Messaggio non valido")

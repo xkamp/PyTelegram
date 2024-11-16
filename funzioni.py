@@ -6,7 +6,8 @@ import time
 import multiprocessing
 from datetime import datetime, timedelta
 import sqlite3
-
+import threading
+import asyncio
 
 def initialize_mt5():
     if not mt5.initialize():
@@ -277,7 +278,7 @@ def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
 
-def crea_tabelle(conn):
+def crea_tabelle_database(conn):
     c = conn.cursor()
     c.execute('''  
         CREATE TABLE IF NOT EXISTS MessageIdOrderId (
@@ -289,12 +290,99 @@ def crea_tabelle(conn):
     conn.commit()
 
 
-def inserisci_id(conn, MessageId, OrderId):
-    c = conn.cursor()
-    c.execute("INSERT INTO MessageIdOrderId (MessageId, OrderId) VALUES (?,?)", (MessageId,OrderId))
-    conn.commit()
+def inserisci_MessageIdOrderId_database(conn, data_batch):
+    """
+    Inserisce un batch di coppie MessageId e OrderId nel database.
+    
+    Args:
+        conn (sqlite3.Connection): Connessione al database SQLite.
+        data_batch (list): Lista di tuple (MessageId, OrderId).
+    """
+    try:
+        c = conn.cursor()
+        c.executemany("INSERT INTO MessageIdOrderId (MessageId, OrderId) VALUES (?,?)", data_batch)
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Errore durante la funzione inserisci_id_database con errore: {e}")
 
-def cerca_messageid(conn, MessageId):
+
+def inserisci_id_database_async(conn, data_batch):
+    """
+    Inserisce un batch di dati nel database in un thread separato.
+    
+    Args:
+        conn (sqlite3.Connection): Connessione al database SQLite.
+        data_batch (list): Lista di tuple (MessageId, OrderId).
+    """
+    def worker(conn, data_batch):
+        try:
+            #logging.info(f"Inserimento batch di {len(data_batch)} righe...")
+            inserisci_id_database(conn, data_batch)
+        except Exception as e:
+            logging.error(f"Errore durante la funzione inserisci_id_database_async con errore: {e}")
+
+    # Crea un nuovo thread per l'inserimento
+    thread = threading.Thread(target=worker, args=(conn, data_batch))
+    thread.start()
+
+
+def manage_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, insert_func, conn):
+    """
+    Gestisce il dizionario e avvia un inserimento asincrono nel database
+    quando il numero di righe supera le 1000.
+    
+    Args:
+        data_dict (OrderedDict): Il dizionario condiviso.
+        message_id (int): ID del messaggio.
+        order_id (int): ID dell'ordine.
+        insert_func (callable): Funzione per l'inserimento nel database.
+        conn: Connessione al database.
+    """
+    # Aggiunge una nuova coppia al dizionario
+    dict_messageid_orderid[message_id] = order_id
+    
+    # Controlla se il dizionario ha raggiunto 1000 righe
+    if len(dict_messageid_orderid) >= 1000:
+        # Estrai le prime 100 coppie
+        first_100 = list(dict_messageid_orderid.items())[:100]
+        
+        # Inserisci i dati nel database (asincrono)
+        insert_func(conn, first_100)
+        
+        # Elimina le prime 100 coppie
+        for key, _ in first_100:
+            dict_messageid_orderid.pop(key)
+
+
+# Funzione per cancellare dal dizionario e dal database
+def cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, conn):
+    # Cancella la coppia dal dizionario
+    if message_id in dict_messageid_orderid and dict_messageid_orderid[message_id] == order_id:
+        del dict_messageid_orderid[message_id]
+
+    # Se la coppia non è più presente nel dizionario, avvia un thread per cancellarla dal DB
+    if message_id not in dict_messageid_orderid or dict_messageid_orderid[message_id] != order_id:
+        threading.Thread(target=asyncio.run, args=(cancella_MessageIdOrderId_db(message_id, order_id, conn),)).start()
+
+# Funzione asincrona per cancellare dalla tabella nel database
+async def cancella_MessageIdOrderId_db(message_id, order_id,conn):
+    """
+    Cancella una coppia MessageId e OrderId dalla tabella nel database.
+    
+    Args:
+        conn (sqlite3.Connection): Connessione al database SQLite.
+        message_id (str): MessageId da cancellare.
+        order_id (str): OrderId da cancellare.
+    """
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM MessageIdOrderId WHERE MessageId = ? AND OrderId = ?", (message_id, order_id))
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Errore durante la funzione cancella_id_database con errore: {e}")
+
+
+def cerca_messageid_database(conn, MessageId):
     c=conn.cursor()
     c.execute("SELECT * FROM MessageIdOrderId WHERE MessageId=?", (MessageId,))
     return c.fetchone()
