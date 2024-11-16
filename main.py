@@ -35,7 +35,9 @@ async def handler(event):
     
     if event.is_reply:
         # Se il messaggio è una risposta, esegui azioni specifiche
-        logging.info("Il messaggio è una risposta, ma non sono state specificate azioni.")
+        logging.info("Il messaggio è una risposta")
+        
+
 
 
 
