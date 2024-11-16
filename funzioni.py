@@ -19,9 +19,13 @@ def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
 
-def close_order(order_ticket):
+def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
     if order_ticket is not None:
         mt5.order_close(order_ticket)
+        order = mt5.order_get(order_ticket)
+        if  order is None:
+            # Ordine chiuso con successo quindi cancella dal dizionario
+            cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket, conn)
 
 
 
@@ -279,14 +283,12 @@ async def cancella_MessageIdOrderId_db(message_id, order_id,conn):
         logging.error(f"Errore durante la funzione cancella_id_database con errore: {e}")
 
 
-
-# Funzione per chiudere la connessione
 def chiudi_connessione_db(conn):
     conn.close()
 
 
 
-def monitor_order(order_ticket, tp, sl, symbol, order_type):
+def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
     """Monitors a trade order and closes it when the Take Profit or Stop Loss is reached.
 
     The function continuously checks the current market price for the specified symbol 
@@ -343,26 +345,25 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type):
             if order_type == "BUY":
                 if tick.ask >= tp:
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-
-                    close_order(order_ticket)
+                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
                 elif tick.ask <= sl:
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket)
+                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
             elif order_type == "SELL":
                 if tick.bid <= tp:
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket)
+                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
                 elif tick.bid >= sl:
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket)
+                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
 
 
 
-def monitor_order_process(order_id, tp, sl, symbol, order_type, message_id, conn):
+def monitor_order_process(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
     """Starts a new process to monitor a trade order in the background.
 
     This function creates and starts a new process that runs the `monitor_order` 
@@ -384,7 +385,7 @@ def monitor_order_process(order_id, tp, sl, symbol, order_type, message_id, conn
           running even after the main program terminates.
         - The function invokes the `monitor_order` function with the provided arguments.
     """
-    process = multiprocessing.Process(target=monitor_order, args=(order_id, tp, sl, symbol, order_type, message_id, conn))
+    process = multiprocessing.Process(target=monitor_order, args=(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid))
     process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
     process.start()
 
