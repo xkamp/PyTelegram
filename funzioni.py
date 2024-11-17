@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import sqlite3
 import threading
 import asyncio
+import time
 
 def initialize_mt5():
     if not mt5.initialize():
@@ -20,7 +21,7 @@ def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
 
-def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
+def esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid):
     if order_ticket is None:
         return False
 
@@ -37,7 +38,7 @@ def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
         action = mt5.TRADE_ACTION_DEAL  # Chiude un ordine aperto
 
     # Chiudi l'ordine (sia aperto che pendente)
-    result = mt5.order_send(
+    request = mt5.order_send(
         action=action,
         symbol=ordine.symbol,
         volume=ordine.volume,
@@ -48,11 +49,103 @@ def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
         magic=ordine.magic,
         ticket=order_ticket
     )
+    # Invia la richiesta per chiudere l'ordine
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"Errore durante la chiusura dell'ordine: {result.retcode}")
+        return False
     
     # Restituisce True se l'ordine è stato chiuso con successo
     if result > 0:
         cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket, conn)
 
+
+def esegui_comando_change_TP(order_id, nuovo_tp):
+    """
+    Modifica il Take Profit (TP) di un ordine esistente su MetaTrader 5.
+
+    Args:
+        order_id (int): ID dell'ordine da modificare.
+        original_message_id (int): ID del messaggio associato (per il dizionario).
+        conn (oggetto): Connessione al database o altra risorsa (non usata qui).
+        dict_messageid_orderid (dict): Dizionario che associa message_id a order_id.
+        nuovo_tp (float): Nuovo valore di Take Profit da impostare.
+
+    Returns:
+        bool: True se l'operazione è riuscita, False altrimenti.
+    """
+    if order_id is None or nuovo_tp is None:
+        logging.error("Errore: order_id o nuovo_tp non validi.")
+        return False
+
+    # Ottieni l'ordine
+    ordine = mt5.order_get(ticket=order_id)
+    if ordine is None:
+        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+        return False
+
+    # Prepara la richiesta per modificare il TP
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,  # Azione per modificare SL/TP
+        "symbol": ordine.symbol,
+        "sl": ordine.sl,  # Mantieni lo stesso Stop Loss
+        "tp": nuovo_tp,   # Imposta il nuovo Take Profit
+        "magic": ordine.magic,
+        "ticket": order_id,
+    }
+
+    # Invia la richiesta per modificare il TP
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logging.error(f"Errore durante la modifica del TP: {result.retcode}")
+        return False
+
+    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
+    return True
+    
+
+def esegui_comando_change_SL(order_id, nuovo_sl):
+    """
+    Modifica lo Stop Loss (SL) di un ordine esistente su MetaTrader 5.
+
+    Args:
+        order_id (int): ID dell'ordine da modificare.
+        original_message_id (int): ID del messaggio associato (per il dizionario).
+        conn (oggetto): Connessione al database o altra risorsa (non usata qui).
+        dict_messageid_orderid (dict): Dizionario che associa message_id a order_id.
+        nuovo_sl (float): Nuovo valore di Stop Loss da impostare.
+
+    Returns:
+        bool: True se l'operazione è riuscita, False altrimenti.
+    """
+    if order_id is None or nuovo_sl is None:
+        logging.error("Errore: order_id o nuovo_sl non validi.")
+        return False
+
+    # Ottieni l'ordine
+    ordine = mt5.order_get(ticket=order_id)
+    if ordine is None:
+        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+        return False
+
+    # Prepara la richiesta per modificare lo SL
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,  # Azione per modificare SL/TP
+        "symbol": ordine.symbol,
+        "sl": nuovo_sl,   # Imposta il nuovo Stop Loss
+        "tp": ordine.tp,  # Mantieni lo stesso Take Profit
+        "magic": ordine.magic,
+        "ticket": order_id,
+    }
+
+    # Invia la richiesta per modificare lo SL
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logging.error(f"Errore durante la modifica dello SL: {result.retcode}")
+        return False
+
+    logging.info(f"SL dell'ordine {order_id} modificato correttamente a {nuovo_sl}.")
+    return True
 
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minutes):
@@ -332,20 +425,20 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, di
             if order_type == "BUY":
                 if tick.ask >= tp:
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
                 elif tick.ask <= sl:
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
             elif order_type == "SELL":
                 if tick.bid <= tp:
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
                 elif tick.bid >= sl:
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
                     break
 
 
@@ -405,65 +498,300 @@ def parse_command_reply(message, comandi):
     return executed_commands
 
 
-def esegui_comandi_process(array_command_da_eseguire):
+def monitor_breakeven_order(order_id, max_attempts=100000, sleep_interval=1):
+    """
+    Imposta lo stop loss di un ordine sul prezzo di entrata appena il prezzo di mercato lo permette.
+    Gestisce ordini di tipo Buy, Sell, Buy Limit, Buy Stop, Sell Limit, e Sell Stop.
+    Riprova fino a max_attempts volte se il prezzo di mercato non consente di spostare lo SL.
+    
+    Args:
+        order_id (int): L'ID dell'ordine da modificare.
+        max_attempts (int): Numero massimo di tentativi di aggiornamento dello SL.
+        sleep_interval (int): Tempo di attesa (in secondi) tra i tentativi.
+        
+    Returns:
+        bool: True se l'operazione è stata completata con successo, False altrimenti.
+    """
+    # Recupera i dettagli dell'ordine
+    order = mt5.positions_get(ticket=order_id)
+    if not order:
+        logging.info(f"Ordine con ID {order_id} non trovato.")
+        return False
+
+    order = order[0]  # Prende il primo elemento della lista (l'ordine specifico)
+    entry_price = order.price_open  # Prezzo di apertura
+    symbol = order.symbol  # Simbolo dell'ordine
+    order_type = order.type  # Tipo dell'ordine
+
+    # Recupera il prezzo di mercato corrente
+    market_price = mt5.symbol_info_tick(symbol)
+    if not market_price:
+        logging.error(f"Impossibile recuperare il prezzo di mercato per il simbolo {symbol}.")
+        return False
+
+    # Funzione per verificare se il prezzo di mercato consente di spostare lo SL
+    def can_move_sl(order_type, entry_price, market_price):
+        if order_type == mt5.ORDER_TYPE_BUY:
+            return market_price.bid >= entry_price
+        elif order_type == mt5.ORDER_TYPE_SELL:
+            return market_price.ask <= entry_price
+        elif order_type == mt5.ORDER_TYPE_BUY_LIMIT:
+            return market_price.bid >= entry_price
+        elif order_type == mt5.ORDER_TYPE_SELL_LIMIT:
+            return market_price.ask <= entry_price
+        elif order_type == mt5.ORDER_TYPE_BUY_STOP:
+            return market_price.bid >= entry_price
+        elif order_type == mt5.ORDER_TYPE_SELL_STOP:
+            return market_price.ask <= entry_price
+        return False
+
+    # Tenta di spostare lo SL finché non ci riesce o raggiunge il numero massimo di tentativi
+    attempt = 0
+    while attempt < max_attempts:
+        # Verifica se il prezzo di mercato consente di spostare lo SL
+        if can_move_sl(order_type, entry_price, market_price):
+            # Imposta il nuovo SL al prezzo di entrata
+            request = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": order_id,
+                "sl": entry_price,
+                "tp": order.tp  # Mantieni il take profit invariato
+            }
+
+            # Esegui la modifica
+            result = mt5.order_send(request)
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                logging.info(f"SL spostato al prezzo di entrata per l'ordine {order_id}.")
+                return True
+            else:
+                logging.error(f"Errore nello spostare lo SL per l'ordine {order_id}. Retcode: {result.retcode}")
+                return False
+        else:
+            # Aumento il contatore dei tentativi
+            attempt += 1
+            logging.info(f"Tentativo {attempt} di {max_attempts}. Il prezzo di mercato non consente ancora di spostare lo SL.")
+            time.sleep(sleep_interval)  # Attendere un po' prima di riprovare
+            # Recupera nuovamente il prezzo di mercato
+            market_price = mt5.symbol_info_tick(symbol)
+            if not market_price:
+                logging.error(f"Impossibile recuperare il prezzo di mercato per il simbolo {symbol}.")
+                return False
+
+    logging.error(f"Non è stato possibile spostare lo SL dopo {max_attempts} tentativi.")
+    return False
+
+
+def esegui_comando_breakeven(dict_messageid_orderid,message_id):
+    for order_id in dict_messageid_orderid[message_id]:
+        #avvia il processo per il monitoraggio del breakeven e appena può lo esegue
+        process = multiprocessing.Process(target=monitor_breakeven_order, args=(order_id))
+        process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+        process.start()
+
+
+
+def extract_number(text):
+    """
+    Estrae il numero decimale da una stringa.
+
+    Args:
+        text (str): La stringa da cui estrarre il numero.
+
+    Returns:
+        float: Il numero estratto, se presente, altrimenti None.
+    """
+    match = re.search(r"\d+\.\d+", text)  # Cerca un numero decimale
+    return float(match.group())
+
+def search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
+    """
+    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
+
+    Args:
+        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
+        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
+
+    Returns:
+        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
+        None: Se `original_message_id` non è presente o l'array associato è vuoto.
+    """
+    # Controlla se la chiave esiste nel dizionario
+    if original_message_id in dict_messageid_orderid:
+        # Accedi all'array associato alla chiave
+        array = dict_messageid_orderid[original_message_id]
+        # Restituisci il primo valore se l'array non è vuoto
+        if array:
+            return array[0]
+    # Restituisci None se la chiave non esiste o l'array è vuoto
+    return None
+
+def search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
+    """
+    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
+
+    Args:
+        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
+        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
+
+    Returns:
+        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
+        None: Se `original_message_id` non è presente o l'array associato è vuoto.
+    """
+    # Controlla se la chiave esiste nel dizionario
+    if original_message_id in dict_messageid_orderid:
+        # Accedi all'array associato alla chiave
+        array = dict_messageid_orderid[original_message_id]
+        # Restituisci il primo valore se l'array non è vuoto
+        if array:
+            return array[1]
+    # Restituisci None se la chiave non esiste o l'array è vuoto
+    return None
+
+def search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
+    """
+    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
+
+    Args:
+        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
+        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
+
+    Returns:
+        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
+        None: Se `original_message_id` non è presente o l'array associato è vuoto.
+    """
+    # Controlla se la chiave esiste nel dizionario
+    if original_message_id in dict_messageid_orderid:
+        # Accedi all'array associato alla chiave
+        array = dict_messageid_orderid[original_message_id]
+        # Restituisci il primo valore se l'array non è vuoto
+        if array:
+            return array[2]
+    # Restituisci None se la chiave non esiste o l'array è vuoto
+    return None
+
+def search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
+    """
+    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
+
+    Args:
+        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
+        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
+
+    Returns:
+        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
+        None: Se `original_message_id` non è presente o l'array associato è vuoto.
+    """
+    # Controlla se la chiave esiste nel dizionario
+    if original_message_id in dict_messageid_orderid:
+        # Accedi all'array associato alla chiave
+        array = dict_messageid_orderid[original_message_id]
+        # Restituisci il primo valore se l'array non è vuoto
+        if array:
+            return array[3]
+    # Restituisci None se la chiave non esiste o l'array è vuoto
+    return None
+
+def search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
+    """
+    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
+
+    Args:
+        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
+        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
+
+    Returns:
+        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
+        None: Se `original_message_id` non è presente o l'array associato è vuoto.
+    """
+    # Controlla se la chiave esiste nel dizionario
+    if original_message_id in dict_messageid_orderid:
+        # Accedi all'array associato alla chiave
+        array = dict_messageid_orderid[original_message_id]
+        # Restituisci il primo valore se l'array non è vuoto
+        if array:
+            return array[4]
+    # Restituisci None se la chiave non esiste o l'array è vuoto
+    return None
+
+
+def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,message_text):
     for command in array_command_da_eseguire:
         #metto qua il controllo del comando così lo fa' solo una volta per ogni process
         if command == "change_TP1":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_tp = extract_number(message_text)
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP2":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_tp = extract_number(message_text)
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()  
         if command == "change_TP3":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_tp = extract_number(message_text)
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP4":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_tp = extract_number(message_text)
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP5":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_tp = extract_number(message_text)
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
-        if command == "change_SL":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+        if command == "change_SL": #cambia lo stop a tutti gli ordini con message_id uguale
+            new_sl = extract_number(message_text)
+            #ciclo dentro l'array del dizionario con la chiave original_message_id
+            for order_id in dict_messageid_orderid[original_message_id]:
+                process = multiprocessing.Process(target=esegui_comando_change_SL, args=(order_id, new_sl))
+                process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+                process.start()
+            process = multiprocessing.Process(target=esegui_comando_change_SL, args=())
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "breakeven":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process = multiprocessing.Process(target=esegui_comando_breakeven, args=(dict_messageid_orderid,original_message_id))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "close_full":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
-            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale terminA
-            process.start()
+            for order_id in dict_messageid_orderid[original_message_id]:
+                process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
+                process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale terminA
+                process.start()
         if command == "close_TP1":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "close_TP2":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "close_TP3":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "close_TP4":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "close_TP5":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            order_id = search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            process = multiprocessing.Process(target=esegui_comando_close_order,args=(order_id, original_message_id, conn, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
-        if command == "delete":
-            process = multiprocessing.Process(target=esegui_comando, args=(command,))
-            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
-            process.start()
+
 
 
 

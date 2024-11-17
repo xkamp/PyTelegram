@@ -37,7 +37,8 @@ async def handler(event):
         # Se il messaggio è una risposta, esegui azioni specifiche
         logging.info("Il messaggio è una risposta")
         array_command_da_eseguire = parse_command_reply(event.reply_to_msg.text, comandi)
-        esegui_comandi_process(array_command_da_eseguire)
+        original_message_id = event.reply_to.reply_to_msg_id
+        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,event.reply_to_msg.text)
 
 
 
