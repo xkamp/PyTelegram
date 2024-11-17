@@ -40,10 +40,6 @@ async def handler(event):
         original_message_id = event.reply_to.reply_to_msg_id
         esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,event.reply_to_msg.text)
 
-
-
-
-
     else:
         # Se non è una risposta, prosegui con il processo del comando
         message = event.raw_text
