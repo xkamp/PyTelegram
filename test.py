@@ -1,41 +1,47 @@
-import logging
-from funzioni import parse_command
+def parse_command_reply(message, comandi):
+    """
+    Analizza un messaggio e, in base alle parole chiave nel dizionario `comandi`, esegue le azioni corrispondenti.
+    
+    Args:
+    message (str): Il messaggio di input da analizzare.
+    comandi (dict): Un dizionario che mappa le parole chiave a comandi.
+    
+    Returns:
+    list: Una lista di comandi eseguiti (se trovati nel messaggio).
+    """
+    executed_commands = []
 
-# Abilita la registrazione degli errori
-logging.basicConfig(level=logging.DEBUG)
+    # Convertiamo il messaggio in minuscolo per evitare problemi con maiuscole/minuscole
+    message = message.lower()
 
-def test_parse_command():
+    # Cicliamo su ogni comando nel dizionario
+    for key, command in comandi.items():
+        # Verifica se il comando (in minuscolo) è una sottostringa nel messaggio
+        if command.lower() in message:
+            # Aggiungiamo il comando eseguito alla lista
+            executed_commands.append(key)
 
-    command = parse_command("""
-    📈BUY        GBP/USD
+    return executed_commands
 
-    Entry price     1.2659 / 1.2664
+# Esempio di utilizzo:
+comandi = {
+    "change_TP1": "CHANGE TP1 TO",
+    "change_TP2": "CHANGE TP2 TO",
+    "change_TP3": "CHANGE TP3 TO",
+    "change_TP4": "CHANGE TP4 TO",
+    "change_TP5": "CHANGE TP5 TO",
+    "change_SL" : "CHANGE SL TO",
+    "breakeven": "SECURE THIS TRADE",
+    "close full" : "MANUALLY CLOSE, CANCEL THIS TRADE, REMOVE IT",
+    "close_TP1" : "MANUALLY CLOSE TP1",
+    "close_TP2" : "MANUALLY CLOSE TP2",
+    "close_TP3" : "MANUALLY CLOSE TP3",
+    "close_TP4" : "MANUALLY CLOSE TP4",
+    "close_TP5" : "MANUALLY CLOSE TP5",
+    "delete" : "DELETE"
+}
 
-    TP1 :      1.2679
-    TP2 :      1.2709
-    TP3 :      1.2759
-
-    SL        1.2589
-
-    Please respect your lot size ⚠️⚠️Risk
-    """)
-    print(f"Passato: {command}\n")
-    if command:
-        order_type = command["order_type"]
-        symbol = command["symbol"]
-        entry_price = command["entry_price"]
-        take_profits = command["take_profits"]
-        stop_loss = command["stop_loss"]
-
-        # Imposta il volume del trade (può essere calcolato o definito manualmente)
-        volume = 0.01  # Ad esempio, volume fisso per ogni trade. Puoi personalizzarlo
-
-        # Invia un ordine per ogni Take Profitclea
-        for tp in take_profits:
-             print(f"Invio ordine per TP={tp}")
-
-
-# Chiamare la funzione di test
-test_parse_command()
-
-
+# Esempio di messaggio
+message = "I want to secure this trade now"
+result = parse_command_reply(message, comandi)
+print(result)  # Uscita: ['breakeven']

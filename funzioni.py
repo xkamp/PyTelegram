@@ -15,9 +15,9 @@ def initialize_mt5():
         raise SystemExit("Errore nella connessione a MetaTrader 5")
     logging.info("MetaTrader 5 inizializzato con successo.")
 
+
 def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
-
 
 
 def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
@@ -56,33 +56,6 @@ def close_order(order_ticket, message_id, conn, dict_messageid_orderid):
 
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minutes):
-    """Sends a trade order to the MetaTrader5 platform.
-
-    The function determines the appropriate order type (limit or stop) based on the 
-    specified `order_type` and the current market price. It then constructs and sends 
-    an order request using the MetaTrader5 API.
-
-    Args:
-        order_type (str): The type of order, either "BUY" or "SELL".
-        symbol (str): The trading symbol (e.g., "EURUSD").
-        volume (float): The number of lots to trade.
-        sl (float): The stop loss price.
-        tp (float): The take profit price.
-        entry_price (float): The price at which to enter the trade.
-        magic (int): A unique identifier for the trade.
-        num_minutes (int): The time duration in minutes before the order expires.
-
-    Returns:
-        dict: The result of the `mt5.order_send()` function containing information 
-        about the order execution.
-        None: If an error occurs during order preparation or submission.
-    
-    Notes:
-        - The function retrieves the current market price using `mt5.symbol_info_tick()`.
-        - It sets the appropriate order type based on the market price and the provided `entry_price`.
-        - Symbol visibility is ensured using `mt5.symbol_select()`.
-        - The order request includes parameters such as deviation, action, and expiration.
-    """
 
     #configuriamo il tipo d'ordine
     tick = mt5.symbol_info_tick(symbol)
@@ -204,7 +177,6 @@ def parse_command(message):
 
 
 
-
 def crea_tabelle_database(conn):
     c = conn.cursor()
     c.execute('''  
@@ -253,20 +225,9 @@ def inserisci_id_database_async(conn, data_batch):
     thread.start()
 
 
-def manage_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, insert_func, conn):
-    """
-    Gestisce il dizionario e avvia un inserimento asincrono nel database
-    quando il numero di righe supera le 1000.
-    
-    Args:
-        data_dict (OrderedDict): Il dizionario condiviso.
-        message_id (int): ID del messaggio.
-        order_id (int): ID dell'ordine.
-        insert_func (callable): Funzione per l'inserimento nel database.
-        conn: Connessione al database.
-    """
+def manage_dict_messageid_orderid(dict_messageid_orderid, message_id, array_order_id, insert_func, conn):
     # Aggiunge una nuova coppia al dizionario
-    dict_messageid_orderid[message_id] = order_id
+    dict_messageid_orderid[message_id] = array_order_id
     
     # Controlla se il dizionario ha raggiunto 1000 righe
     if len(dict_messageid_orderid) >= 1000:
@@ -278,7 +239,7 @@ def manage_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, 
         
         # Elimina le prime 100 coppie
         for key, _ in first_100:
-            dict_messageid_orderid.pop(key)
+            dict_messageid_orderid.pop(key, None)
 
 
 def cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, conn):
@@ -389,31 +350,11 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, di
 
 
 
-def monitor_order_process(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
-    """Starts a new process to monitor a trade order in the background.
-
-    This function creates and starts a new process that runs the `monitor_order` 
-    function with the provided arguments. The monitoring process will continue 
-    running independently of the main program.
-
-    Args:
-        order_ticket (int): The unique ID of the order to monitor.
-        tp (float): The Take Profit price.
-        sl (float): The Stop Loss price.
-        symbol (str): The trading symbol (e.g., "EURUSD").
-        order_type (str): The type of order ("BUY" or "SELL").
-
-    Returns:
-        None: The function starts a new process to monitor the order.
-    
-    Notes:
-        - The new process runs with `process.daemon = False`, meaning it will continue
-          running even after the main program terminates.
-        - The function invokes the `monitor_order` function with the provided arguments.
-    """
-    process = multiprocessing.Process(target=monitor_order, args=(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid))
-    process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
-    process.start()
+def monitor_order_process(array_success, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
+    for order_id in array_success:
+        process = multiprocessing.Process(target=monitor_order, args=(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid))
+        process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
+        process.start()
 
 
 def carica_dizionario_da_json(nome_file):
@@ -436,3 +377,94 @@ def carica_dizionario_da_json(nome_file):
         logging.error(f"Errore: il file {nome_file} non è un file JSON valido.")
     except Exception as e:
         logging.error(f"Errore inaspettato: {e}")
+
+
+def parse_command_reply(message, comandi):
+    """
+    Analizza un messaggio e, in base alle parole chiave nel dizionario `comandi`, esegue le azioni corrispondenti.
+    
+    Args:
+    message (str): Il messaggio di input da analizzare.
+    comandi (dict): Un dizionario che mappa le parole chiave a comandi.
+    
+    Returns:
+    list: Una lista di comandi eseguiti (se trovati nel messaggio).
+    """
+    executed_commands = []
+
+    # Convertiamo il messaggio in minuscolo per evitare problemi con maiuscole/minuscole
+    message = message.lower()
+
+    # Cicliamo su ogni comando nel dizionario
+    for key, command in comandi.items():
+        # Verifica se il comando (in minuscolo) è una sottostringa nel messaggio
+        if command.lower() in message:
+            # Aggiungiamo il comando eseguito alla lista
+            executed_commands.append(key)
+
+    return executed_commands
+
+
+def esegui_comandi_process(array_command_da_eseguire):
+    for command in array_command_da_eseguire:
+        #metto qua il controllo del comando così lo fa' solo una volta per ogni process
+        if command == "change_TP1":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "change_TP2":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()  
+        if command == "change_TP3":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "change_TP4":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "change_TP5":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "change_SL":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "breakeven":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "close_full":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale terminA
+            process.start()
+        if command == "close_TP1":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "close_TP2":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "close_TP3":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "close_TP4":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "close_TP5":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+        if command == "delete":
+            process = multiprocessing.Process(target=esegui_comando, args=(command,))
+            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
+            process.start()
+
+
+
+    

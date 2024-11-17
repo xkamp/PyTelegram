@@ -36,7 +36,8 @@ async def handler(event):
     if event.is_reply:
         # Se il messaggio è una risposta, esegui azioni specifiche
         logging.info("Il messaggio è una risposta")
-        
+        array_command_da_eseguire = parse_command_reply(event.reply_to_msg.text, comandi)
+        esegui_comandi_process(array_command_da_eseguire)
 
 
 
@@ -65,18 +66,23 @@ async def handler(event):
             volume = 0.01  # Volume fisso per ogni trade. Puoi personalizzarlo
             num_minutes = 3  # Sostituire con il numero di minuti
             messagge_id = event.message.id  # Associa l'ordine al messaggio
+            retries = 0
             max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
+            array_success = []
 
             # Invia un ordine per ogni Take Profit
             for tp in take_profits:
                 for retries in range(max_retries):
                     success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, messagge_id, num_minutes)
                     if success is not None:
-                        manage_dict_messageid_orderid(dict_messageid_orderid, messagge_id, success, inserisci_id_database_async, conn)  # Inserisce coppia nel dizionario e salva nel db
-                        monitor_order_process(success, tp, stop_loss, symbol, order_type, messagge_id, conn, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
-                        break
+                        array_success.append(success)    
                     else:
                         logging.info(f"Impossibile inviare l'ordine dopo {max_retries} tentativi.")
+            if len(array_success) == 3:           
+                manage_dict_messageid_orderid(dict_messageid_orderid, messagge_id, array_success, inserisci_id_database_async, conn) # Inserisce coppia nel dizionario e salva nel db
+                monitor_order_process(array_success, tp, stop_loss, symbol, order_type, messagge_id, conn, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
+                  
+
         else:
             # Messaggio di segnale non valido
             logging.warning("Messaggio non valido.")

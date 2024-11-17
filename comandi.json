@@ -6,7 +6,7 @@
     "change_TP5": "CHANGE TP5 TO",
     "change_SL" : "CHANGE SL TO",
     "breakeven": "SECURE THIS TRADE",
-    "close full" : "MANUALLY CLOSE, CANCEL THIS TRADE, REMOVE IT",
+    "close_full" : "MANUALLY CLOSE, CANCEL THIS TRADE, REMOVE IT",
     "close_TP1" : "MANUALLY CLOSE TP1",
     "close_TP2" : "MANUALLY CLOSE TP2",
     "close_TP3" : "MANUALLY CLOSE TP3",
