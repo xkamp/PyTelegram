@@ -1,11 +1,18 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# File di log
 *.log
-.env
-*.sqlite3
-.vscode/
-.idea/
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Cartelle di ambienti virtuali
 venv/
+env/
+
+# File compilati Python
+*.pyc
+__pycache__/
+
+# Configurazioni locali
+*.env
 *.session
