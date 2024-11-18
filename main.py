@@ -40,12 +40,12 @@ async def handler(event):
         message = event.raw_text
         #logging.info(f"Testo della risposta: {message}")
         array_command_da_eseguire = parse_command_reply(message, comandi)
-        logging.info(f"array_command_da_eseguire: {array_command_da_eseguire}")
+        #logging.info(f"array_command_da_eseguire: {array_command_da_eseguire}")
 
         reply_message = await event.get_reply_message()
         original_message_id =reply_message.id
-        original_message_text = reply_message.text
-        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id, original_message_text)
+        #original_message_text = reply_message.text
+        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id, message)
 
     else:
         # Se non è una risposta, prosegui con il processo del comando
@@ -78,7 +78,7 @@ async def handler(event):
             # Invia un ordine per ogni Take Profit
             for tp in take_profits:
                 for retries in range(max_retries):
-                    #logging.info(f"Invio ordine per TP: {tp}")
+                    logging.info(f"Invio ordine per TP: {tp}")
                     success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, messagge_id, num_minutes)
                     if success is not None:
                         array_success.append(success)

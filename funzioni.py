@@ -128,28 +128,40 @@ def esegui_comando_change_TP(order_id, nuovo_tp):
     Returns:
         bool: True se l'operazione è riuscita, False altrimenti.
     """
+    if not mt5.initialize():
+        logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
+        raise SystemExit("Errore nella connessione a MetaTrader 5")
+
     if order_id is None or nuovo_tp is None:
         logging.error("Errore: order_id o nuovo_tp non validi.")
         return False
-
+    ordini = mt5.orders_get()
+    
     # Ottieni l'ordine
-    ordine = mt5.orders_get(ticket=order_id)
+    ordine = mt5.orders_get(ticket=int(order_id))
+    #logging.info(f"Ordini trovati: {ordine}")
     if ordine is None:
-        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
-        return False
+        ordine = mt5.positions_get(ticket=order_id)
+        logging.info(f"Ordini pendant trovati: {ordine}")
+        if ordine is None:
+            logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+            return False
     current_ordine = ordine[0]
     # Prepara la richiesta per modificare il TP
+    logging.info(f"current_ordine: {current_ordine}")
+    logging.info(f"order_id da modificare: {order_id}, nuovo_tp: {nuovo_tp}")
     request = {
         "action": mt5.TRADE_ACTION_SLTP,  # Azione per modificare SL/TP
-        "symbol": current_ordine.symbol,
+        "position": order_id,
         "sl": current_ordine.sl,  # Mantieni lo stesso Stop Loss
         "tp": nuovo_tp,   # Imposta il nuovo Take Profit
-        "magic": current_ordine.magic,
-        "ticket": order_id,
+        
     }
 
     # Invia la richiesta per modificare il TP
     result = mt5.order_send(request)
+    logging.info(f"result: {result}")
+
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         logging.error(f"Errore durante la modifica del TP: {result.retcode}")
         return False
@@ -261,7 +273,7 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic, num_minut
         "deviation": 0,  # Deviation a zero, può essere personalizzato
         "magic": magic,  # Usa il magic number per identificare l'ordine
         "comment": "Trade inviato da Telegram",
-        "type_time": mt5.ORDER_TIME_DAY,  # Tipo di scadenza: specificata
+        "type_time": mt5.ORDER_TIME_GTC,  # Tipo di scadenza: specificata
         "type_filling": mt5.ORDER_FILLING_IOC,  # Tipo di riempimentcleao
         #"expiration": expiration_timestamp,  # Data di scadenza dell'ordine
     }
@@ -673,7 +685,6 @@ def esegui_comando_breakeven(dict_messageid_orderid,message_id):
         process.start()
 
 
-
 def extract_number(text):
     """
     Estrae il numero decimale da una stringa.
@@ -803,36 +814,36 @@ def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_order
         #metto qua il controllo del comando così lo fa' solo una volta per ogni process
         if command == "change_TP1":
             order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
-            new_tp = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP2":
             order_id = search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
-            new_tp = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()  
         if command == "change_TP3":
             order_id = search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
-            new_tp = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP4":
             order_id = search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
-            new_tp = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP5":
             order_id = search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
-            new_tp = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_SL": #cambia lo stop a tutti gli ordini con message_id uguale
-            new_sl = extract_number(message_text)
+            new_tp = float(extract_number(message_text))
             #ciclo dentro l'array del dizionario con la chiave original_message_id
             for order_id in dict_messageid_orderid[original_message_id]:
                 process = multiprocessing.Process(target=esegui_comando_change_SL, args=(order_id, new_sl))
