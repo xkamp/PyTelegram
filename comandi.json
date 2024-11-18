@@ -12,5 +12,5 @@
     "close_TP3" : "MANUALLY CLOSE TP3",
     "close_TP4" : "MANUALLY CLOSE TP4",
     "close_TP5" : "MANUALLY CLOSE TP5",
-    "delete" : ""
+    "delete" : "delete this trade"
 }

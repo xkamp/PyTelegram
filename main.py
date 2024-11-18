@@ -3,6 +3,7 @@ from telethon import TelegramClient, events
 import MetaTrader5 as mt5
 import logging
 from funzioni import *  # Assicurati che le funzioni necessarie siano nel modulo funzioni
+import sys
 
 # Imposta i dati di accesso per il client Telegram
 api_id = 21280755
@@ -35,19 +36,26 @@ async def handler(event):
     
     if event.is_reply:
         # Se il messaggio è una risposta, esegui azioni specifiche
-        logging.info("Il messaggio è una risposta")
-        array_command_da_eseguire = parse_command_reply(event.reply_to_msg.text, comandi)
-        original_message_id = event.reply_to.reply_to_msg_id
-        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,event.reply_to_msg.text)
+        #logging.info("Il messaggio è una risposta")
+        message = event.raw_text
+        #logging.info(f"Testo della risposta: {message}")
+        array_command_da_eseguire = parse_command_reply(message, comandi)
+        logging.info(f"array_command_da_eseguire: {array_command_da_eseguire}")
+
+        reply_message = await event.get_reply_message()
+        original_message_id =reply_message.id
+        original_message_text = reply_message.text
+        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id, original_message_text)
 
     else:
         # Se non è una risposta, prosegui con il processo del comando
         message = event.raw_text
-        # logging.info(f"messaggio ricevuto: {message}")
+        #logging.info(f"messaggio ricevuto: {message}")
         
         command = parse_command(message)
-        # logging.info(f"Comando ricevuto: {command}")
+        #logging.info(f"Comando ricevuto: {command}")
         
+
         if command:
             order_type = command["order_type"]
             symbol = command["symbol"]
@@ -61,23 +69,27 @@ async def handler(event):
 
             # Imposta il volume del trade
             volume = 0.01  # Volume fisso per ogni trade. Puoi personalizzarlo
-            num_minutes = 3  # Sostituire con il numero di minuti
+            num_minutes = 60  # Sostituire con il numero di minuti NON FUNZIONA 
             messagge_id = event.message.id  # Associa l'ordine al messaggio
             retries = 0
             max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
             array_success = []
-
+            
             # Invia un ordine per ogni Take Profit
             for tp in take_profits:
                 for retries in range(max_retries):
+                    #logging.info(f"Invio ordine per TP: {tp}")
                     success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, messagge_id, num_minutes)
                     if success is not None:
-                        array_success.append(success)    
+                        array_success.append(success)
+                        break    
                     else:
                         logging.info(f"Impossibile inviare l'ordine dopo {max_retries} tentativi.")
+
+            #logging.info(f"Ordini inviati con successo: {array_success}")
             if len(array_success) == 3:           
                 manage_dict_messageid_orderid(dict_messageid_orderid, messagge_id, array_success, inserisci_id_database_async, conn) # Inserisce coppia nel dizionario e salva nel db
-                monitor_order_process(array_success, tp, stop_loss, symbol, order_type, messagge_id, conn, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
+                monitor_order_process(array_success, tp, stop_loss, symbol, order_type, messagge_id, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
                   
 
         else:
@@ -90,9 +102,9 @@ async def handler(event):
 async def main():
 
 
-    logging.info("Avvio del client Telegram...")
+    #logging.info("Avvio del client Telegram...")
     await client.start()
-    logging.info("Client Telegram avviato.")
+    #logging.info("Client Telegram avviato.")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":

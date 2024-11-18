@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import asyncio
 import time
+import sys
 
 def initialize_mt5():
     if not mt5.initialize():
@@ -21,44 +22,97 @@ def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
 
-def esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid):
+def close_order_market(order_id):
+    # Initialize the connection to MetaTrader 5
+    if not mt5.initialize():
+        print("Initialization failed")
+        return
+    
+    # Get the position by order_id
+    positions = mt5.positions_get(ticket=order_id)
+    print('open positions', positions)
+
+    # Working with 1st position in the list and closing it
+    pos1 = positions[0]
+
+    def reverse_type(type):
+        # to close a buy positions, you must perform a sell position and vice versa
+        if type == mt5.ORDER_TYPE_BUY:
+            return mt5.ORDER_TYPE_SELL
+        elif type == mt5.ORDER_TYPE_SELL:
+            return mt5.ORDER_TYPE_BUY
+
+
+    def get_close_price(symbol, type):
+        if type == mt5.ORDER_TYPE_BUY:
+            return mt5.symbol_info(symbol).bid
+        elif type == mt5.ORDER_TYPE_SELL:
+            return mt5.symbol_info(symbol).ask
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "position": pos1.ticket,
+        "symbol": pos1.symbol,
+        "volume": pos1.volume,
+        "type": reverse_type(pos1.type),
+        "price":get_close_price(pos1.symbol, pos1.type),
+        "deviation": 20,
+        "magic": 0,
+        "comment": "python close order",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,  # some brokers accept mt5.ORDER_FILLING_FOK only
+    }
+
+    res = mt5.order_send(request)
+    logging.info(f" {res} --> closed successfully.")
+
+def close_order_pending(order_id):
+    if not mt5.initialize():
+        logging.error("initialize() failed, error code =", mt5.last_error())
+        return
+
+    # Recupera tutti gli ordini attivi
+    orders = mt5.orders_get()
+    if orders is None:
+        logging.error("No orders found, error code =", mt5.last_error())
+        return
+
+    # Cerca l'ordine con l'ID specificato
+    order = None
+    for o in orders:
+        if o.ticket == order_id:
+            order = o
+            break
+
+    if order is None:
+        print(f"No order found with ID {order_id}")
+        return
+
+    # Chiusura dell'ordine
+    close_request = {
+        "action": mt5.TRADE_ACTION_REMOVE,
+        "order": order.ticket,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+        "type_time": mt5.ORDER_TIME_GTC
+    }
+
+    result = mt5.order_send(close_request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logging.error(f"Failed to close order: {result.retcode}, {result.comment}")
+    else:
+        logging.info(f"Order {order_id} closed successfully.")
+
+
+def esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid):
     if order_ticket is None:
         return False
-
-    # Ottieni l'ordine
-    ordine = mt5.order_get(order_ticket)
-    if ordine is None:
-        return False
-    
-        # Determina l'azione da eseguire (chiusura dell'ordine)
-    if ordine.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT, 
-                        mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP]:
-        action = mt5.TRADE_ACTION_REMOVE  # Rimuove un ordine pendente
+    positions = mt5.orders_get(ticket=order_ticket)
+    if positions is None:
+        close_order_market(order_ticket)
     else:
-        action = mt5.TRADE_ACTION_DEAL  # Chiude un ordine aperto
+        close_order_pending(order_ticket)
 
-    # Chiudi l'ordine (sia aperto che pendente)
-    request = mt5.order_send(
-        action=action,
-        symbol=ordine.symbol,
-        volume=ordine.volume,
-        type=ordine.type,
-        price=ordine.price,
-        sl=ordine.sl,
-        tp=ordine.tp,
-        magic=ordine.magic,
-        ticket=order_ticket
-    )
-    # Invia la richiesta per chiudere l'ordine
-    result = mt5.order_send(request)
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"Errore durante la chiusura dell'ordine: {result.retcode}")
-        return False
-    
-    # Restituisce True se l'ordine è stato chiuso con successo
-    if result > 0:
-        cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket, conn)
-
+    cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket)
 
 def esegui_comando_change_TP(order_id, nuovo_tp):
     """
@@ -79,18 +133,18 @@ def esegui_comando_change_TP(order_id, nuovo_tp):
         return False
 
     # Ottieni l'ordine
-    ordine = mt5.order_get(ticket=order_id)
+    ordine = mt5.orders_get(ticket=order_id)
     if ordine is None:
         logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
         return False
-
+    current_ordine = ordine[0]
     # Prepara la richiesta per modificare il TP
     request = {
         "action": mt5.TRADE_ACTION_SLTP,  # Azione per modificare SL/TP
-        "symbol": ordine.symbol,
-        "sl": ordine.sl,  # Mantieni lo stesso Stop Loss
+        "symbol": current_ordine.symbol,
+        "sl": current_ordine.sl,  # Mantieni lo stesso Stop Loss
         "tp": nuovo_tp,   # Imposta il nuovo Take Profit
-        "magic": ordine.magic,
+        "magic": current_ordine.magic,
         "ticket": order_id,
     }
 
@@ -148,9 +202,23 @@ def esegui_comando_change_SL(order_id, nuovo_sl):
     return True
 
 
-def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minutes):
+def send_order(order_type, symbol, volume, sl, tp, entry_price, magic, num_minutes):
+    # Inizializza la connessione con MetaTrader 5
+    if not mt5.initialize():
+        logging.error(f"Impossibile connettersi a MetaTrader 5. Errore: {mt5.last_error()}")
+        return None
 
-    #configuriamo il tipo d'ordine
+    # Verifica la disponibilità del simbolo
+    symbol_info = mt5.symbol_info(symbol)
+    if not symbol_info:
+        logging.error(f"Simbolo {symbol} non trovato.")
+        return None
+    if not symbol_info.visible:
+        if not mt5.symbol_select(symbol, True):
+            logging.error(f"Impossibile attivare il simbolo {symbol}.")
+            return None
+
+    # Recupera il prezzo di mercato per l'ordine
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
         logging.error(f"Errore nel recupero del prezzo per {symbol}.")
@@ -158,6 +226,7 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minute
 
     market_price = tick.ask if order_type == "BUY" else tick.bid
 
+    # Configura il tipo di ordine in base al prezzo di ingresso
     if order_type == "BUY":
         order_type = mt5.ORDER_TYPE_BUY_LIMIT if float(entry_price) <= market_price else mt5.ORDER_TYPE_BUY_STOP
     elif order_type == "SELL":
@@ -166,44 +235,50 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic,num_minute
         logging.error(f"Tipo di ordine {order_type} non valido.")
         return None
 
-    # Ottieni i dati del simbolo e verifica la visibilità
-    symbol_info = mt5.symbol_info(symbol)
-    if not symbol_info:
-        logging.error(f"Simbolo {symbol} non trovato.")
-        return None
-
-    if not symbol_info.visible:
-        if not mt5.symbol_select(symbol, True):  # Attiva il simbolo nel terminale
-            logging.error(f"Impossibile attivare il simbolo {symbol}.")
-            return None
-        
-    #TO DO: creare una classe con le variabili per l'ordine
-    deviation = 0  # Valore standard, puoi personalizzarlo
+    
+    # Configurazione dei parametri dell'ordine
     action = mt5.TRADE_ACTION_PENDING
-    now = datetime.now()
-    experation = now + timedelta(minutes=num_minutes)
+    # Aggiungi i minuti alla data e ora attuali
+    scadenza = datetime.now() + timedelta(minutes=num_minutes)
+    scadenza_senza_secondi = scadenza.replace(second=0, microsecond=0)
+    
+    # Restituisci il timestamp Unix
+    expiration_timestamp = int(scadenza_senza_secondi.timestamp())
+    #logging.info(f"Expiration timestamp: {expiration_timestamp}")
+    data_ora = datetime.fromtimestamp(expiration_timestamp)
+    #logging.info(f"Data e ora di scadenza: {data_ora}")
 
-    # Crea l'ordine
+
+    # Crea la richiesta per l'ordine
     request = {
         "action": action,
-        "symbol": symbol,  
-        "volume": volume,  # Utilizza il valore di volume,
-        "type": order_type,  
-        "price": float(entry_price), 
-        "sl": float(sl),  
-        "tp": float(tp),  
-        "deviation": 0,
-        "magic": 0,  
+        "symbol": symbol,
+        "volume": volume,  # Utilizza il valore di volume
+        "type": order_type,
+        "price": float(entry_price),
+        "sl": float(sl),
+        "tp": float(tp),
+        "deviation": 0,  # Deviation a zero, può essere personalizzato
+        "magic": magic,  # Usa il magic number per identificare l'ordine
         "comment": "Trade inviato da Telegram",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-        "expiration_time": experation,
+        "type_time": mt5.ORDER_TIME_DAY,  # Tipo di scadenza: specificata
+        "type_filling": mt5.ORDER_FILLING_IOC,  # Tipo di riempimentcleao
+        #"expiration": expiration_timestamp,  # Data di scadenza dell'ordine
     }
     
+    # Log dell'ordine creato
+    #logging.info(f"Ordine creato: {request}")
+
     # Invia l'ordine
     result = mt5.order_send(request)
+    #logging.error(f"Errore nell'invio dell'ordine: {result}")
 
-    return result.order
+    if result == None:
+        logging.error(f"Errore nell'invio dell'ordine: {mt5.last_error()}")
+        return None
+    else:
+        #logging.info(f"Ordine inviato con successo. Ticket dell'ordine: {result.order}")
+        return result.order
 
 
 
@@ -334,19 +409,20 @@ def manage_dict_messageid_orderid(dict_messageid_orderid, message_id, array_orde
         for key, _ in first_100:
             dict_messageid_orderid.pop(key, None)
 
+    #logging.info(f"il dizionario è: {dict_messageid_orderid}")
 
-def cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id, conn):
+def cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_id):
     # Cancella la coppia dal dizionario
     if message_id in dict_messageid_orderid and dict_messageid_orderid[message_id] == order_id:
         del dict_messageid_orderid[message_id]
 
     # Se la coppia non è più presente nel dizionario, avvia un thread per cancellarla dal DB
     if message_id not in dict_messageid_orderid or dict_messageid_orderid[message_id] != order_id:
-        threading.Thread(target=asyncio.run, args=(cancella_MessageIdOrderId_db(message_id, order_id, conn),)).start()
+        threading.Thread(target=asyncio.run, args=(cancella_MessageIdOrderId_db(message_id, order_id),)).start()
 
 
 
-async def cancella_MessageIdOrderId_db(message_id, order_id,conn):
+async def cancella_MessageIdOrderId_db(message_id, order_id):
     """
     Cancella una coppia MessageId e OrderId dalla tabella nel database.
     
@@ -356,6 +432,7 @@ async def cancella_MessageIdOrderId_db(message_id, order_id,conn):
         order_id (str): OrderId da cancellare.
     """
     try:
+        conn = connessione_db("database")
         c = conn.cursor()
         c.execute("DELETE FROM MessageIdOrderId WHERE MessageId = ? AND OrderId = ?", (message_id, order_id))
         conn.commit()
@@ -368,7 +445,7 @@ def chiudi_connessione_db(conn):
 
 
 
-def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
+def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, dict_messageid_orderid):
     """Monitors a trade order and closes it when the Take Profit or Stop Loss is reached.
 
     The function continuously checks the current market price for the specified symbol 
@@ -391,7 +468,7 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, di
         - The market price is retrieved using `mt5.symbol_info_tick()` and compared with TP/SL.
         - If the TP or SL is reached, the order is closed using a helper function `close_order()`.
     """
-
+    logging.info(f"Monitoraggio dell'ordine {order_ticket} in corso...")
     last_tick = None
     if not mt5.initialize():
         # Se l'inizializzazione fallisce, logga l'errore
@@ -414,38 +491,45 @@ def monitor_order(order_ticket, tp, sl, symbol, order_type, message_id, conn, di
         # Ottieni il tick di mercato corrente
         tick = mt5.symbol_info_tick(symbol)
         if not tick:
-                #logging.warning(f"Errore nel recupero dei tick per {symbol}.")
+                logging.warning(f"Errore nel recupero dei tick per {symbol}.")
                 continue
+        
 
         # Controlla se il tick di mercato ha cambiato
         if tick != last_tick:
             last_tick = tick
-
+            #logging.info(f"Tick di mercato per {symbol}: {tick}")
             # Controlla se il TP o SL sono stati raggiunti
             if order_type == "BUY":
-                if tick.ask >= tp:
+                #logging.info(f"ordine = {order_ticket}, TP: {tp}, SL: {sl}, tick.ask: {tick.ask}, tick.bid: {tick.bid}")
+                if float(tick.ask) >= float(tp):
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid)
                     break
-                elif tick.ask <= sl:
+                elif float(tick.ask) <= float(sl):
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid)
                     break
             elif order_type == "SELL":
-                if tick.bid <= tp:
+                if float(tick.bid) <= float(tp):
                     logging.info(f"Take Profit hit for order {order_ticket}. Closing order.")
-                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid)
                     break
-                elif tick.bid >= sl:
+                elif float(tick.bid) >= float(sl):
                     logging.info(f"Stop Loss hit for order {order_ticket}. Closing order.")
-                    esegui_comando_close_order(order_ticket, message_id, conn, dict_messageid_orderid)
+                    esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid)
                     break
 
 
 
-def monitor_order_process(array_success, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid):
+def monitor_order_process(array_success, tp, sl, symbol, order_type, message_id, dict_messageid_orderid):
+    take_profit = None
     for order_id in array_success:
-        process = multiprocessing.Process(target=monitor_order, args=(order_id, tp, sl, symbol, order_type, message_id, conn, dict_messageid_orderid))
+        orders = mt5.orders_get(ticket=order_id)
+        for order in orders:
+            take_profit = order.tp 
+            #logging.info(f"Take Profit: {take_profit}")
+        process = multiprocessing.Process(target=monitor_order, args=(order_id, take_profit, sl, symbol, order_type, message_id, dict_messageid_orderid))
         process.daemon = False  # Non è un processo demon, continuerà anche quando il programma principale termina
         process.start()
 
