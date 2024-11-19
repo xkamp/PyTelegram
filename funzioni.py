@@ -106,15 +106,16 @@ def close_order_pending(order_id):
 def esegui_comando_close_order(order_ticket, message_id, dict_messageid_orderid):
     if order_ticket is None:
         return False
-    positions = mt5.orders_get(ticket=order_ticket)
-    if positions is None:
+    orders = mt5.orders_get(ticket=order_ticket)
+    #se ordini è vuoto significa che il treade è aperto a mercato
+    if orders is None or len(orders) == 0:
         close_order_market(order_ticket)
     else:
         close_order_pending(order_ticket)
 
     cancella_coppia_dict_messageid_orderid(dict_messageid_orderid, message_id, order_ticket)
 
-def esegui_comando_change_TP(order_id, nuovo_tp):
+def esegui_comando_change_TP_market_order(order_id, nuovo_tp):
     """
     Modifica il Take Profit (TP) di un ordine esistente su MetaTrader 5.
 
@@ -135,17 +136,13 @@ def esegui_comando_change_TP(order_id, nuovo_tp):
     if order_id is None or nuovo_tp is None:
         logging.error("Errore: order_id o nuovo_tp non validi.")
         return False
-    ordini = mt5.orders_get()
     
     # Ottieni l'ordine
-    ordine = mt5.orders_get(ticket=int(order_id))
+    ordine = mt5.positions_get(ticket=int(order_id))
     #logging.info(f"Ordini trovati: {ordine}")
     if ordine is None:
-        ordine = mt5.positions_get(ticket=order_id)
-        logging.info(f"Ordini pendant trovati: {ordine}")
-        if ordine is None:
-            logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
-            return False
+        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+        return False
     current_ordine = ordine[0]
     # Prepara la richiesta per modificare il TP
     logging.info(f"current_ordine: {current_ordine}")
@@ -168,50 +165,186 @@ def esegui_comando_change_TP(order_id, nuovo_tp):
 
     logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
     return True
-    
 
-def esegui_comando_change_SL(order_id, nuovo_sl):
+def replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id_old, order_id_new):
     """
-    Modifica lo Stop Loss (SL) di un ordine esistente su MetaTrader 5.
+    Sostituisce order_id_old con order_id_new in tutti i valori del dizionario.
 
-    Args:
-        order_id (int): ID dell'ordine da modificare.
-        original_message_id (int): ID del messaggio associato (per il dizionario).
-        conn (oggetto): Connessione al database o altra risorsa (non usata qui).
-        dict_messageid_orderid (dict): Dizionario che associa message_id a order_id.
-        nuovo_sl (float): Nuovo valore di Stop Loss da impostare.
-
-    Returns:
-        bool: True se l'operazione è riuscita, False altrimenti.
+    :param dict_messageid_orderid: Dizionario in cui i valori contengono order_id.
+    :param order_id_old: L'order_id da sostituire.
+    :param order_id_new: L'order_id con cui sostituire il precedente.
     """
-    if order_id is None or nuovo_sl is None:
-        logging.error("Errore: order_id o nuovo_sl non validi.")
+    for message_id, order_ids in dict_messageid_orderid.items():
+        # Controlla se l'order_id_old è presente e sostituiscilo
+        if order_id_old in order_ids:
+            order_ids.remove(order_id_old)  # Rimuovi il vecchio ID
+            order_ids.add(order_id_new)    # Aggiungi il nuovo ID
+
+
+def esegui_comando_change_TP_pending_order(order_id, nuovo_tp, original_message_text, original_message_id, dict_messageid_orderid):
+    if not mt5.initialize():
+        logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
+        raise SystemExit("Errore nella connessione a MetaTrader 5")
+
+    if order_id is None or nuovo_tp is None:
+        logging.error("Errore: order_id o nuovo_tp non validi.")
         return False
-
+    
     # Ottieni l'ordine
-    ordine = mt5.order_get(ticket=order_id)
+    ordine = mt5.orders_get(ticket=int(order_id))
+    #logging.info(f"Ordini trovati: {ordine}")
+    if ordine is None or len(ordine) == 0:
+        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+        return False
+    current_ordine = ordine[0]
+    #rimuoviamo prima l'ordine e poi lo riaggiungiamo con il nuovo tp
+    close_order_pending(current_ordine.ticket)
+
+    #inviamo un nuovo ordine con il nuovo tp
+    #retrive delle informazioni dell'ordine dal messaggio originale
+    command = parse_command(original_message_text)
+    if command:
+            order_type = command["order_type"]
+            symbol = command["symbol"]
+            entry_price = command["entry_price"]
+            take_profits = command["take_profits"]
+            stop_loss = command["stop_loss"]
+
+            if not symbol or not order_type:
+                logging.warning("Messaggio non valido.")
+                return
+
+            # Imposta il volume del trade
+            volume = 0.01  # Volume fisso per ogni trade. Puoi personalizzarlo
+            num_minutes = 60  # Sostituire con il numero di minuti NON FUNZIONA 
+            messagge_id = original_message_id  # Associa l'ordine al messaggio
+            retries = 0
+            max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
+            
+            
+            # Invia un ordine per ogni Take Profit
+            for tp in take_profits:
+                #questo if serve per aprire l'ordine appena cancellatto
+                if current_ordine.take_profit == tp:
+                    for retries in range(max_retries):
+                        success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, messagge_id, num_minutes)
+                        #bisogna modificare il dizionario per inserire correttamente il nuovo ordine rimuovendo quello vecchio
+                        replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
+
+    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
+    return True
+
+def esegui_comando_change_SL_pending_order(order_id, nuovo_sl, original_message_text, original_message_id, dict_messageid_orderid):
+    if not mt5.initialize():
+        logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
+        raise SystemExit("Errore nella connessione a MetaTrader 5")
+
+    if order_id is None or nuovo_sl is None:
+        logging.error("Errore: order_id o nuovo_tp non validi.")
+        return False
+    
+    # Ottieni l'ordine
+    ordine = mt5.orders_get(ticket=int(order_id))
+    #logging.info(f"Ordini trovati: {ordine}")
+    if ordine is None or len(ordine) == 0:
+        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
+        return False
+    current_ordine = ordine[0]
+    #rimuoviamo prima l'ordine e poi lo riaggiungiamo con il nuovo tp
+    close_order_pending(current_ordine.ticket)
+
+    #inviamo un nuovo ordine con il nuovo tp
+    #retrive delle informazioni dell'ordine dal messaggio originale
+    command = parse_command(original_message_text)
+    if command:
+            order_type = command["order_type"]
+            symbol = command["symbol"]
+            entry_price = command["entry_price"]
+            take_profits = command["take_profits"]
+            stop_loss = command["stop_loss"]
+
+            if not symbol or not order_type:
+                logging.warning("Messaggio non valido.")
+                return
+
+            # Imposta il volume del trade
+            volume = 0.01  # Volume fisso per ogni trade. Puoi personalizzarlo
+            num_minutes = 60  # Sostituire con il numero di minuti NON FUNZIONA 
+            messagge_id = original_message_id  # Associa l'ordine al messaggio
+            retries = 0
+            max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
+            
+            
+            # Invia un ordine per ogni Take Profit
+            for tp in take_profits:            
+                for retries in range(max_retries):
+                    success = send_order(order_type, symbol, volume, nuovo_sl, tp, entry_price, messagge_id, num_minutes)
+                    #bisogna modificare il dizionario per inserire correttamente il nuovo ordine rimuovendo quello vecchio
+                    replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
+
+    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_sl}.")
+    return True
+
+
+def esegui_comando_change_SL_market_order(order_id, nuovo_sl):
+    if not mt5.initialize():
+        logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
+        raise SystemExit("Errore nella connessione a MetaTrader 5")
+
+    if order_id is None or nuovo_sl is None:
+        logging.error("Errore: order_id o nuovo_tp non validi.")
+        return False
+    
+    # Ottieni l'ordine
+    ordine = mt5.positions_get(ticket=int(order_id))
+    #logging.info(f"Ordini trovati: {ordine}")
     if ordine is None:
         logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
         return False
-
-    # Prepara la richiesta per modificare lo SL
+    current_ordine = ordine[0]
+    # Prepara la richiesta per modificare il TP
+    logging.info(f"current_ordine: {current_ordine}")
+    logging.info(f"order_id da modificare: {order_id}, nuovo_tp: {nuovo_sl}")
     request = {
         "action": mt5.TRADE_ACTION_SLTP,  # Azione per modificare SL/TP
-        "symbol": ordine.symbol,
-        "sl": nuovo_sl,   # Imposta il nuovo Stop Loss
-        "tp": ordine.tp,  # Mantieni lo stesso Take Profit
-        "magic": ordine.magic,
-        "ticket": order_id,
+        "position": order_id,
+        "sl": nuovo_sl,  
+        "tp": current_ordine.take_profit   
+        
     }
 
-    # Invia la richiesta per modificare lo SL
+    # Invia la richiesta per modificare il TP
     result = mt5.order_send(request)
+    logging.info(f"result: {result}")
+
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logging.error(f"Errore durante la modifica dello SL: {result.retcode}")
+        logging.error(f"Errore durante la modifica del TP: {result.retcode}")
         return False
 
-    logging.info(f"SL dell'ordine {order_id} modificato correttamente a {nuovo_sl}.")
+    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
     return True
+
+def esegui_comando_change_TP(order_id, nuovo_tp,original_message_text, original_message_id, dict_messageid_orderid):
+    if order_id is None:
+        return False
+    orders = mt5.orders_get(ticket=order_id)
+    #se ordini è vuoto significa che il treade è aperto a mercato
+    if orders is None or len(orders) == 0:
+        esegui_comando_change_TP_market_order(order_id, nuovo_tp)
+    else:
+        esegui_comando_change_TP_pending_order(order_id, nuovo_tp,original_message_text, original_message_id, dict_messageid_orderid)
+
+
+def esegui_comando_change_SL(order_id, nuovo_sl, original_message_text, original_message_id, dict_messageid_orderid):
+    if order_id is None:
+        return False
+    orders = mt5.orders_get(ticket = order_id)
+    #se ordini è vuoto significa che il treade è aperto a mercato
+    if orders is None or len(orders) == 0:
+        esegui_comando_change_SL_market_order(order_id, nuovo_sl)
+    else:
+        esegui_comando_change_SL_pending_order(order_id, nuovo_sl,original_message_text, original_message_id, dict_messageid_orderid)
+
 
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic, num_minutes):
@@ -291,7 +424,6 @@ def send_order(order_type, symbol, volume, sl, tp, entry_price, magic, num_minut
     else:
         #logging.info(f"Ordine inviato con successo. Ticket dell'ordine: {result.order}")
         return result.order
-
 
 
 def parse_command(message):
@@ -809,13 +941,13 @@ def search_order5_dict_messageid_orderid(dict_messageid_orderid, original_messag
     return None
 
 
-def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,message_text):
+def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,message_text,original_message_text):
     for command in array_command_da_eseguire:
         #metto qua il controllo del comando così lo fa' solo una volta per ogni process
         if command == "change_TP1":
             order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP2":
@@ -843,10 +975,10 @@ def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_order
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_SL": #cambia lo stop a tutti gli ordini con message_id uguale
-            new_tp = float(extract_number(message_text))
+            new_sl = float(extract_number(message_text))
             #ciclo dentro l'array del dizionario con la chiave original_message_id
             for order_id in dict_messageid_orderid[original_message_id]:
-                process = multiprocessing.Process(target=esegui_comando_change_SL, args=(order_id, new_sl))
+                process = multiprocessing.Process(target=esegui_comando_change_SL(order_id, new_sl, original_message_text, original_message_id, dict_messageid_orderid))
                 process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
                 process.start()
             process = multiprocessing.Process(target=esegui_comando_change_SL, args=())

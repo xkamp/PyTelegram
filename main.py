@@ -44,8 +44,8 @@ async def handler(event):
 
         reply_message = await event.get_reply_message()
         original_message_id =reply_message.id
-        #original_message_text = reply_message.text
-        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id, message)
+        original_message_text = reply_message.text
+        esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id, message, original_message_text)
 
     else:
         # Se non è una risposta, prosegui con il processo del comando
@@ -89,7 +89,7 @@ async def handler(event):
             #logging.info(f"Ordini inviati con successo: {array_success}")
             if len(array_success) == 3:           
                 manage_dict_messageid_orderid(dict_messageid_orderid, messagge_id, array_success, inserisci_id_database_async, conn) # Inserisce coppia nel dizionario e salva nel db
-                monitor_order_process(array_success, tp, stop_loss, symbol, order_type, messagge_id, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
+                #monitor_order_process(array_success, tp, stop_loss, symbol, order_type, messagge_id, dict_messageid_orderid)  # Avvia il processo di monitoraggio dell'ordine
                   
 
         else:
