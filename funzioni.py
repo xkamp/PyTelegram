@@ -21,7 +21,6 @@ def initialize_mt5():
 def connessione_db(nome_db):
     return sqlite3.connect(f"{nome_db}.db")
 
-
 def close_order_market(order_id):
     # Initialize the connection to MetaTrader 5
     if not mt5.initialize():
@@ -170,16 +169,16 @@ def replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id_
     """
     Sostituisce order_id_old con order_id_new in tutti i valori del dizionario.
 
-    :param dict_messageid_orderid: Dizionario in cui i valori contengono order_id.
+    :param dict_messageid_orderid: Dizionario in cui i valori sono liste contenenti order_id.
     :param order_id_old: L'order_id da sostituire.
     :param order_id_new: L'order_id con cui sostituire il precedente.
     """
     for message_id, order_ids in dict_messageid_orderid.items():
-        # Controlla se l'order_id_old è presente e sostituiscilo
+        # Controlla se l'order_id_old è presente nella lista
         if order_id_old in order_ids:
-            order_ids.remove(order_id_old)  # Rimuovi il vecchio ID
-            order_ids.add(order_id_new)    # Aggiungi il nuovo ID
-
+            order_ids = [order_id_new if x == order_id_old else x for x in order_ids]
+            dict_messageid_orderid[message_id] = order_ids
+    return dict_messageid_orderid
 
 def esegui_comando_change_TP_pending_order(order_id, nuovo_tp, original_message_text, original_message_id, dict_messageid_orderid):
     if not mt5.initialize():
@@ -197,6 +196,7 @@ def esegui_comando_change_TP_pending_order(order_id, nuovo_tp, original_message_
         logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
         return False
     current_ordine = ordine[0]
+    tp_check = current_ordine.tp
     #rimuoviamo prima l'ordine e poi lo riaggiungiamo con il nuovo tp
     close_order_pending(current_ordine.ticket)
 
@@ -225,13 +225,19 @@ def esegui_comando_change_TP_pending_order(order_id, nuovo_tp, original_message_
             # Invia un ordine per ogni Take Profit
             for tp in take_profits:
                 #questo if serve per aprire l'ordine appena cancellatto
-                if current_ordine.take_profit == tp:
-                    for retries in range(max_retries):
-                        success = send_order(order_type, symbol, volume, stop_loss, tp, entry_price, messagge_id, num_minutes)
-                        #bisogna modificare il dizionario per inserire correttamente il nuovo ordine rimuovendo quello vecchio
-                        replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
 
-    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
+                if float(tp) == float(tp_check): 
+                    for retries in range(max_retries):
+                        success = send_order(order_type, symbol, volume, stop_loss, nuovo_tp, entry_price, messagge_id, num_minutes)
+                        #logging.info(f"il dizionario è : {dict_messageid_orderid}")
+                        #logging.info(f"il ticket dell'ordine nuovo è : {success}")
+                        #bisogna modificare il dizionario per inserire correttamente il nuovo ordine rimuovendo quello vecchio
+                        dict_messageid_orderid = replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
+                        #logging.info(f"il dizionario è : {dict_messageid_orderid}")
+                        break
+
+    logging.info(f"TP dell'ordine {success} modificato correttamente a {nuovo_tp}.")
+    
     return True
 
 def esegui_comando_change_SL_pending_order(order_id, nuovo_sl, original_message_text, original_message_id, dict_messageid_orderid):
@@ -242,47 +248,40 @@ def esegui_comando_change_SL_pending_order(order_id, nuovo_sl, original_message_
     if order_id is None or nuovo_sl is None:
         logging.error("Errore: order_id o nuovo_tp non validi.")
         return False
-    
-    # Ottieni l'ordine
-    ordine = mt5.orders_get(ticket=int(order_id))
-    #logging.info(f"Ordini trovati: {ordine}")
-    if ordine is None or len(ordine) == 0:
-        logging.error(f"Errore: impossibile trovare l'ordine con ticket {order_id}")
-        return False
-    current_ordine = ordine[0]
-    #rimuoviamo prima l'ordine e poi lo riaggiungiamo con il nuovo tp
-    close_order_pending(current_ordine.ticket)
+    i = 0
+    #ciclo i vari ordini per verificare se lo stop loss è diverso da quello nuovo 
+    if original_message_id in dict_messageid_orderid:
+        for current_order_id in dict_messageid_orderid[original_message_id]:
+            ordine = mt5.orders_get(ticket=int(current_order_id))
+            if ordine is None or len(ordine) == 0:
+                logging.error(f"Errore: impossibile trovare l'ordine con ticket {current_order_id}")
+                return False
+            current_ordine = ordine[0]
+            if current_ordine.sl == nuovo_sl:
+                break
+            else:
+                close_order_pending(current_ordine.ticket)
+                # Imposta il volume del trade
+                volume = current_ordine.volume_current  
+                num_minutes = 60  # Sostituire con il numero di minuti NON FUNZIONA 
+                messagge_id = original_message_id  # Associa l'ordine al messaggio
+                retries = 0
+                max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
+                command = parse_command(original_message_text)
+                order_type = command["order_type"]
+                symbol = command["symbol"]
+                entry_price = command["entry_price"]
+                take_profits = command["take_profits"]
 
-    #inviamo un nuovo ordine con il nuovo tp
-    #retrive delle informazioni dell'ordine dal messaggio originale
-    command = parse_command(original_message_text)
-    if command:
-            order_type = command["order_type"]
-            symbol = command["symbol"]
-            entry_price = command["entry_price"]
-            take_profits = command["take_profits"]
-            stop_loss = command["stop_loss"]
-
-            if not symbol or not order_type:
-                logging.warning("Messaggio non valido.")
-                return
-
-            # Imposta il volume del trade
-            volume = 0.01  # Volume fisso per ogni trade. Puoi personalizzarlo
-            num_minutes = 60  # Sostituire con il numero di minuti NON FUNZIONA 
-            messagge_id = original_message_id  # Associa l'ordine al messaggio
-            retries = 0
-            max_retries = 3  # Numero massimo di tentativi per inviare l'ordine
-            
-            
-            # Invia un ordine per ogni Take Profit
-            for tp in take_profits:            
                 for retries in range(max_retries):
-                    success = send_order(order_type, symbol, volume, nuovo_sl, tp, entry_price, messagge_id, num_minutes)
+                    success = send_order(order_type, symbol, volume, nuovo_sl, take_profits[i], entry_price, messagge_id, num_minutes)             
                     #bisogna modificare il dizionario per inserire correttamente il nuovo ordine rimuovendo quello vecchio
-                    replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
+                    dict_messageid_orderid = replace_order_id_in_dict_messageid_orderid(dict_messageid_orderid, order_id, success)
+                    logging.info(f"TP dell'ordine {success} modificato correttamente a {nuovo_sl} e take_prfit : {take_profits[i]}.")
+                    break
+                i += 1
 
-    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_sl}.")
+    
     return True
 
 
@@ -321,16 +320,19 @@ def esegui_comando_change_SL_market_order(order_id, nuovo_sl):
         logging.error(f"Errore durante la modifica del TP: {result.retcode}")
         return False
 
-    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
+    logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_sl}.")
     return True
 
 def esegui_comando_change_TP(order_id, nuovo_tp,original_message_text, original_message_id, dict_messageid_orderid):
+    if not mt5.initialize():
+        logging.error(f"MetaTrader5 non inizializzato, errore: {mt5.last_error()}")
+        raise SystemExit("Errore nella connessione a MetaTrader 5")
     if order_id is None:
         return False
-    orders = mt5.orders_get(ticket=order_id)
-    #se ordini è vuoto significa che il treade è aperto a mercato
+    orders = mt5.orders_get(ticket = order_id)
+        #se ordini è vuoto significa che il treade è aperto a mercato
     if orders is None or len(orders) == 0:
-        esegui_comando_change_TP_market_order(order_id, nuovo_tp)
+       esegui_comando_change_TP_market_order(order_id, nuovo_tp)
     else:
         esegui_comando_change_TP_pending_order(order_id, nuovo_tp,original_message_text, original_message_id, dict_messageid_orderid)
 
@@ -344,7 +346,6 @@ def esegui_comando_change_SL(order_id, nuovo_sl, original_message_text, original
         esegui_comando_change_SL_market_order(order_id, nuovo_sl)
     else:
         esegui_comando_change_SL_pending_order(order_id, nuovo_sl,original_message_text, original_message_id, dict_messageid_orderid)
-
 
 
 def send_order(order_type, symbol, volume, sl, tp, entry_price, magic, num_minutes):
@@ -700,32 +701,8 @@ def carica_dizionario_da_json(nome_file):
         logging.error(f"Errore inaspettato: {e}")
 
 
-def parse_command_reply(message, comandi):
-    """
-    Analizza un messaggio e, in base alle parole chiave nel dizionario `comandi`, esegue le azioni corrispondenti.
-    
-    Args:
-    message (str): Il messaggio di input da analizzare.
-    comandi (dict): Un dizionario che mappa le parole chiave a comandi.
-    
-    Returns:
-    list: Una lista di comandi eseguiti (se trovati nel messaggio).
-    """
-    executed_commands = []
 
-    # Convertiamo il messaggio in minuscolo per evitare problemi con maiuscole/minuscole
-    message = message.lower()
-
-    # Cicliamo su ogni comando nel dizionario
-    for key, command in comandi.items():
-        # Verifica se il comando (in minuscolo) è una sottostringa nel messaggio
-        if command.lower() in message:
-            # Aggiungiamo il comando eseguito alla lista
-            executed_commands.append(key)
-
-    return executed_commands
-
-
+#da fare
 def monitor_breakeven_order(order_id, max_attempts=100000, sleep_interval=1):
     """
     Imposta lo stop loss di un ordine sul prezzo di entrata appena il prezzo di mercato lo permette.
@@ -807,8 +784,6 @@ def monitor_breakeven_order(order_id, max_attempts=100000, sleep_interval=1):
 
     logging.error(f"Non è stato possibile spostare lo SL dopo {max_attempts} tentativi.")
     return False
-
-
 def esegui_comando_breakeven(dict_messageid_orderid,message_id):
     for order_id in dict_messageid_orderid[message_id]:
         #avvia il processo per il monitoraggio del breakeven e appena può lo esegue
@@ -816,6 +791,41 @@ def esegui_comando_breakeven(dict_messageid_orderid,message_id):
         process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
         process.start()
 
+
+
+
+
+
+
+
+
+
+
+#funzioni corrette
+def parse_command_reply(message, comandi):
+    """
+    Analizza un messaggio e, in base alle parole chiave nel dizionario `comandi`, esegue le azioni corrispondenti.
+    
+    Args:
+    message (str): Il messaggio di input da analizzare.
+    comandi (dict): Un dizionario che mappa le parole chiave a comandi.
+    
+    Returns:
+    list: Una lista di comandi eseguiti (se trovati nel messaggio).
+    """
+    executed_commands = []
+
+    # Convertiamo il messaggio in minuscolo per evitare problemi con maiuscole/minuscole
+    message = message.lower()
+
+    # Cicliamo su ogni comando nel dizionario
+    for key, command in comandi.items():
+        # Verifica se il comando (in minuscolo) è una sottostringa nel messaggio
+        if command.lower() in message:
+            # Aggiungiamo il comando eseguito alla lista
+            executed_commands.append(key)
+
+    return executed_commands
 
 def extract_number(text):
     """
@@ -831,114 +841,150 @@ def extract_number(text):
     return float(match.group())
 
 def search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
-    """
-    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
-
-    Args:
-        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
-        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
-
-    Returns:
-        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
-        None: Se `original_message_id` non è presente o l'array associato è vuoto.
-    """
-    # Controlla se la chiave esiste nel dizionario
     if original_message_id in dict_messageid_orderid:
-        # Accedi all'array associato alla chiave
         array = dict_messageid_orderid[original_message_id]
-        # Restituisci il primo valore se l'array non è vuoto
+        dict_tp = {}
+        
         if array:
-            return array[0]
-    # Restituisci None se la chiave non esiste o l'array è vuoto
+            if not mt5.initialize():
+                error_code, error_msg = mt5.last_error()
+                logging.error(f"Impossibile inizializzare MetaTrader 5. Codice errore: {error_code}, Messaggio: {error_msg}")
+                return None
+            
+            for order_id in array:
+                ordine = mt5.orders_get(ticket=order_id)
+                current_ordine = ordine[0]
+                if current_ordine is None or len(ordine) == 0:
+                    ordine = mt5.positions_get(ticket=order_id)
+                    current_ordine = ordine[0]
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+                else:
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+            
+            # Trova il secondo valore minimo
+            
+            sorted_tickets = sorted(dict_tp, key=dict_tp.get)  # Ordina i ticket in base a `tp`
+            min_ticket = sorted_tickets[0]  # Prendi il primo ticket
+            return min_ticket
+    
     return None
 
 def search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
-    """
-    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
-
-    Args:
-        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
-        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
-
-    Returns:
-        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
-        None: Se `original_message_id` non è presente o l'array associato è vuoto.
-    """
-    # Controlla se la chiave esiste nel dizionario
     if original_message_id in dict_messageid_orderid:
-        # Accedi all'array associato alla chiave
         array = dict_messageid_orderid[original_message_id]
-        # Restituisci il primo valore se l'array non è vuoto
+        dict_tp = {}
+        
         if array:
-            return array[1]
-    # Restituisci None se la chiave non esiste o l'array è vuoto
+            if not mt5.initialize():
+                error_code, error_msg = mt5.last_error()
+                logging.error(f"Impossibile inizializzare MetaTrader 5. Codice errore: {error_code}, Messaggio: {error_msg}")
+                return None
+            
+            for order_id in array:
+                ordine = mt5.orders_get(ticket=order_id)
+                current_ordine = ordine[0]
+                if current_ordine is None or len(ordine) == 0:
+                    ordine = mt5.positions_get(ticket=order_id)
+                    current_ordine = ordine[0]
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+                else:
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+            
+            # Trova il secondo valore minimo
+            
+            sorted_tickets = sorted(dict_tp, key=dict_tp.get)  # Ordina i ticket in base a `tp`
+            min_ticket = sorted_tickets[1]  # Prendi il secondo ticket
+            return min_ticket
+    
     return None
 
 def search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
-    """
-    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
-
-    Args:
-        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
-        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
-
-    Returns:
-        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
-        None: Se `original_message_id` non è presente o l'array associato è vuoto.
-    """
-    # Controlla se la chiave esiste nel dizionario
     if original_message_id in dict_messageid_orderid:
-        # Accedi all'array associato alla chiave
         array = dict_messageid_orderid[original_message_id]
-        # Restituisci il primo valore se l'array non è vuoto
+        dict_tp = {}
+        
         if array:
-            return array[2]
-    # Restituisci None se la chiave non esiste o l'array è vuoto
+            if not mt5.initialize():
+                error_code, error_msg = mt5.last_error()
+                logging.error(f"Impossibile inizializzare MetaTrader 5. Codice errore: {error_code}, Messaggio: {error_msg}")
+                return None
+            
+            for order_id in array:
+                ordine = mt5.orders_get(ticket=order_id)
+                current_ordine = ordine[0]
+                if current_ordine is None or len(ordine) == 0:
+                    ordine = mt5.positions_get(ticket=order_id)
+                    current_ordine = ordine[0]
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+                else:
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+            
+            # Trova il secondo valore minimo
+            
+            sorted_tickets = sorted(dict_tp, key=dict_tp.get)  # Ordina i ticket in base a `tp`
+            min_ticket = sorted_tickets[2]  # Prendi il terzo ticket
+            return min_ticket
+    
     return None
 
 def search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
-    """
-    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
-
-    Args:
-        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
-        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
-
-    Returns:
-        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
-        None: Se `original_message_id` non è presente o l'array associato è vuoto.
-    """
-    # Controlla se la chiave esiste nel dizionario
     if original_message_id in dict_messageid_orderid:
-        # Accedi all'array associato alla chiave
         array = dict_messageid_orderid[original_message_id]
-        # Restituisci il primo valore se l'array non è vuoto
+        dict_tp = {}
+        
         if array:
-            return array[3]
-    # Restituisci None se la chiave non esiste o l'array è vuoto
+            if not mt5.initialize():
+                error_code, error_msg = mt5.last_error()
+                logging.error(f"Impossibile inizializzare MetaTrader 5. Codice errore: {error_code}, Messaggio: {error_msg}")
+                return None
+            
+            for order_id in array:
+                ordine = mt5.orders_get(ticket=order_id)
+                current_ordine = ordine[0]
+                if current_ordine is None or len(ordine) == 0:
+                    ordine = mt5.positions_get(ticket=order_id)
+                    current_ordine = ordine[0]
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+                else:
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+            
+            # Trova il secondo valore minimo
+            
+            sorted_tickets = sorted(dict_tp, key=dict_tp.get)  # Ordina i ticket in base a `tp`
+            min_ticket = sorted_tickets[3]  # Prendi il quarto ticket
+            return min_ticket
+    
     return None
 
 def search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id):
-    """
-    Cerca un `original_message_id` in un dizionario e restituisce il primo valore trovato nell'array associato alla chiave corrispondente.
-
-    Args:
-        dict_messageid_orderid (dict): Dizionario in cui cercare. Le chiavi sono di tipo generico e i valori sono array.
-        original_message_id (int/str): ID del messaggio da cercare nel dizionario.
-
-    Returns:
-        any: Il primo valore trovato nell'array associato alla chiave `original_message_id`.
-        None: Se `original_message_id` non è presente o l'array associato è vuoto.
-    """
-    # Controlla se la chiave esiste nel dizionario
     if original_message_id in dict_messageid_orderid:
-        # Accedi all'array associato alla chiave
         array = dict_messageid_orderid[original_message_id]
-        # Restituisci il primo valore se l'array non è vuoto
+        dict_tp = {}
+        
         if array:
-            return array[4]
-    # Restituisci None se la chiave non esiste o l'array è vuoto
+            if not mt5.initialize():
+                error_code, error_msg = mt5.last_error()
+                logging.error(f"Impossibile inizializzare MetaTrader 5. Codice errore: {error_code}, Messaggio: {error_msg}")
+                return None
+            
+            for order_id in array:
+                ordine = mt5.orders_get(ticket=order_id)
+                current_ordine = ordine[0]
+                if current_ordine is None or len(ordine) == 0:
+                    ordine = mt5.positions_get(ticket=order_id)
+                    current_ordine = ordine[0]
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+                else:
+                    dict_tp[current_ordine.ticket] = current_ordine.tp
+            
+            # Trova il secondo valore minimo
+            
+            sorted_tickets = sorted(dict_tp, key=dict_tp.get)  # Ordina i ticket in base a `tp`
+            min_ticket = sorted_tickets[4]  # Prendi il quarto ticket
+            return min_ticket
+    
     return None
+
 
 
 def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_orderid,original_message_id,message_text,original_message_text):
@@ -947,43 +993,37 @@ def esegui_comandi_process(array_command_da_eseguire, conn, dict_messageid_order
         if command == "change_TP1":
             order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
-            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
-            process.start()
+            esegui_comando_change_TP(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid)
+            
         if command == "change_TP2":
             order_id = search_order2_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()  
         if command == "change_TP3":
             order_id = search_order3_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP4":
             order_id = search_order4_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_TP5":
             order_id = search_order5_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
             new_tp = float(extract_number(message_text))
-            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp))
+            process = multiprocessing.Process(target=esegui_comando_change_TP, args=(order_id, new_tp,original_message_text, original_message_id, dict_messageid_orderid))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
             process.start()
         if command == "change_SL": #cambia lo stop a tutti gli ordini con message_id uguale
-            new_sl = float(extract_number(message_text))
-            #ciclo dentro l'array del dizionario con la chiave original_message_id
-            for order_id in dict_messageid_orderid[original_message_id]:
-                process = multiprocessing.Process(target=esegui_comando_change_SL(order_id, new_sl, original_message_text, original_message_id, dict_messageid_orderid))
-                process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
-                process.start()
-            process = multiprocessing.Process(target=esegui_comando_change_SL, args=())
-            process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina
-            process.start()
+            order_id = search_order1_dict_messageid_orderid(dict_messageid_orderid, original_message_id)
+            new_sl = float(extract_number(message_text))            
+            esegui_comando_change_SL(order_id, new_sl, original_message_text, original_message_id, dict_messageid_orderid)
+
         if command == "breakeven":
             process = multiprocessing.Process(target=esegui_comando_breakeven, args=(dict_messageid_orderid,original_message_id))
             process.daemon = False  # Non é un processo demon, continuerà anche quando il programma principale termina

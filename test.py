@@ -58,4 +58,4 @@ def esegui_comando_change_TP_pending_order(order_id, nuovo_tp):
     logging.info(f"TP dell'ordine {order_id} modificato correttamente a {nuovo_tp}.")
     return True
 
-esegui_comando_change_TP_pending_order(51815056, 1.5)
+esegui_comando_change_TP_pending_order(51855490, 1.5)
